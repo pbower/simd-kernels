@@ -1,0 +1,76 @@
+[package]
+name = "simd-kernels"
+description = "Lightning Fast, Arrow-Compatible Compute Kernels"
+version = "0.1.0"
+edition = "2024"
+authors = ['Peter Bower']
+license-file = "LICENSE"
+keywords = [
+    "simd",
+    "kernels",
+    "arrow",
+    "polars",
+    "data",
+]
+[dependencies]
+minarrow = { version = "0.1.7", default-features = false, optional = false, features = ["views"] }
+num-traits = "0.2.19"
+ordered-float = { version = "5.0.0", optional = true }
+regex = { version = "1.11.1", optional = true }
+ryu = { version = "1.0.20", optional = true }
+memchr = { version = "2.7.5", optional = true }
+num-complex = { version = "0.4.6", optional = true }
+blas = { version = "0.23.0", optional = true }
+lapack = { version = "0.20.0", optional = true }
+ahash = { version = "0.8.12", optional = true }
+rand = "0.9.1"
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+
+[build-dependencies]
+cc = { version = "1", optional = true }
+
+[features]
+large_string = ["minarrow/large_string"]
+datetime = ["minarrow/datetime"]
+regex = ["dep:regex"]
+simd = []
+# Replaces all hashmaps and hashsets used for count distinct operations
+# and categorical dictionary interning with the faster ahash.
+fast_hash = ["dep:ahash"]
+
+# Enables linear algebra kernels. These call out to BLAS and LAPACK.
+# Both `Intel` and `OpenBLAS` are supported. Prefer Intel if you have intel for 
+# speed, except that it is not fully open source, and one should understand its
+# license terms, with an FAQ available at
+# https://www.intel.com/content/www/us/en/developer/articles/tool/onemkl-license-faq.html
+#
+# ⚠️ Warning: Multivariate modules are still under development, and are not fully tested.
+linear_algebra = ["blas", "lapack"]
+
+# Arbitrary element-wise functions. This pattern provides the basis,
+# and it is extendable to any set.
+universal_functions = []
+# Enables FFT kernels
+fourier_transforms = ["dep:num-complex"]
+# Enables CDF and PDF probability distributions
+probability_distributions = []
+extended_numeric_types = ["minarrow/extended_numeric_types"]
+
+# Adds string arithmetic kernels for more niche use cases.
+# Includes (small) external dependencies, and supports
+# str concatenation with floats e.g., "Hello" + 1.0 = "Hello1", etc.
+str_arithmetic = ["ryu", "memchr"]
+
+default = [
+    "regex",
+    "large_string",
+    "probability_distributions",
+    "fast_hash",
+    "simd",
+    "extended_numeric_types",
+    "str_arithmetic",
+    "fourier_transforms",
+    "universal_functions",
+    "datetime"
+]
