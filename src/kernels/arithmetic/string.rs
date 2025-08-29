@@ -1113,7 +1113,7 @@ where
     use ahash::{HashMap, HashMapExt};
 
     #[cfg(not(feature = "fast_hash"))]
-    use ahash::HashMap;
+    use std::collections::HashMap;
 
     let (larr, loff, llen) = lhs;
 

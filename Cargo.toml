@@ -1,7 +1,7 @@
 [package]
 name = "simd-kernels"
 description = "Lightning Fast, Arrow-Compatible Compute Kernels"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ['Peter Bower']
 license-file = "LICENSE"
@@ -63,14 +63,9 @@ extended_numeric_types = ["minarrow/extended_numeric_types"]
 str_arithmetic = ["ryu", "memchr"]
 
 default = [
-    "regex",
     "large_string",
     "probability_distributions",
-    "fast_hash",
     "simd",
-    "extended_numeric_types",
-    "str_arithmetic",
     "fourier_transforms",
     "universal_functions",
-    "datetime"
 ]

@@ -48,7 +48,9 @@ The kernels it implements form the computational core of the analytics stack, an
 - **Linear Algebra**: Optional BLAS/LAPACK backend integration.
 - **FFT**: Blocked radix-2/4/8 pipelines with SIMD and complex arithmetic.
 
-### Feature Flags
+### Feature Compilation
+
+Sub 2-second compile times with standard features.
 
 Modular by design. Enable only what you need:
 
