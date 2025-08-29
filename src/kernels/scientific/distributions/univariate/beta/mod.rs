@@ -52,7 +52,7 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Computes the probability density function (PDF) of the beta distribution.
 ///
@@ -78,7 +78,7 @@ use crate::errors::KernelError;
 /// - Input nulls propagate to output nulls
 /// - SIMD-accelerated when `simd` feature enabled and data is 64-byte aligned
 /// - Falls back to optimised scalar implementation otherwise
-/// 
+///
 /// ## Errors
 /// Returns `KernelError::InvalidArguments` if α ≤ 0, β ≤ 0, or parameters are non-finite.
 ///
@@ -211,9 +211,9 @@ pub fn beta_quantile(
 mod beta_tests {
 
     // See `./tests` for the scipy test suite
-    
-    use crate::kernels::scientific::distributions::univariate::common::dense_data;
+
     use super::*;
+    use crate::kernels::scientific::distributions::univariate::common::dense_data;
     use minarrow::{Bitmask, vec64};
 
     // helpers

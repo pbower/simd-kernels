@@ -9,13 +9,13 @@
 use minarrow::{Bitmask, FloatArray, Vec64};
 use std::f64::consts::PI;
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::constants::*;
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
 };
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// Cauchy PDF (vectorised, SIMD where available), null-aware and Arrow-compliant.
 /// f(x; location, scale) = (1/π)·[scale / ((x − location)² + scale²)]

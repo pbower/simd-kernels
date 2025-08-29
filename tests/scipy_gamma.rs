@@ -13,10 +13,10 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_gamma_tests {
     use super::util::assert_slice_close;
+    use minarrow::vec64;
     use simd_kernels::kernels::scientific::distributions::univariate::gamma::{
         gamma_cdf, gamma_pdf, gamma_quantile,
     };
-    use minarrow::vec64;
 
     // TODO: Fix source for large_shape_2
 

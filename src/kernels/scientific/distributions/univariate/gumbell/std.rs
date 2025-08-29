@@ -10,11 +10,11 @@
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
 };
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// Gumbel (type I extreme value)
 #[inline(always)]

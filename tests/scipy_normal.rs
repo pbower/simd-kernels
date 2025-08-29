@@ -13,10 +13,10 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_normal_tests {
     use super::util::assert_slice_close;
+    use minarrow::vec64;
     use simd_kernels::kernels::scientific::distributions::univariate::normal::{
         normal_cdf, normal_pdf, normal_quantile,
     };
-    use minarrow::vec64;
 
     #[test]
     fn normal_pdf_standard() {

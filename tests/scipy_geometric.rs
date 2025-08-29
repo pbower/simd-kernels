@@ -13,10 +13,10 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_geometric_tests {
     use super::util::assert_slice_close;
+    use minarrow::vec64;
     use simd_kernels::kernels::scientific::distributions::univariate::geometric::{
         geometric_cdf, geometric_pmf, geometric_quantile,
     };
-    use minarrow::vec64;
 
     // TODO: Fix source Including Non-Decimal 'k'
     // use simd_kernels::kernels::scientific::distributions::discrete::geometric::{geometric_pmf, geometric_cdf, geometric_quantile};

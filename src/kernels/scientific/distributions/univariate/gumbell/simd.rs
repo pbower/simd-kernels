@@ -12,16 +12,17 @@ include!(concat!(env!("OUT_DIR"), "/simd_lanes.rs"));
 
 use std::simd::{Simd, StdFloat};
 
+use minarrow::utils::is_simd_aligned;
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::univariate::common::simd::{
     dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
 };
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
 };
-use crate::utils::{has_nulls, is_simd_aligned};
+use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// SIMD-accelerated implementation of Gumbel distribution probability density function.
 ///
@@ -160,7 +161,7 @@ pub fn gumbel_pdf_simd(
 /// - Return period calculations (T = 1/(1-F(x)))
 /// - Reliability analysis and safety margins
 /// - Environmental impact studies
-/// 
+///
 /// ## Example Usage
 /// ```rust,ignore
 /// let x = [-2.0, -1.0, 0.0, 1.0, 2.0];

@@ -384,7 +384,7 @@ pub fn gamma_func(x: f64) -> f64 {
 }
 
 /// Evaluates gamma function at half-integer arguments using closed-form expression.
-/// 
+///
 /// Computes Γ(n + 1/2) for non-negative integer n using the exact closed-form
 /// formula involving factorials and powers.
 #[inline(always)]
@@ -684,7 +684,7 @@ pub fn regularised_gamma_p(s: f64, x: f64) -> f64 {
 }
 
 /// High-performance vectorised logarithmic binomial coefficient computation.
-/// 
+///
 /// Computes ln(C(n,k)) = ln(n! / (k!(n-k)!)) for vectors of n and k values
 /// using SIMD vectorisation and optimised gamma function evaluation.
 #[inline(always)]
@@ -698,7 +698,7 @@ pub fn ln_choose_v(
 }
 
 /// Computes logarithmic binomial coefficient for integer arguments with validation.
-/// 
+///
 /// Evaluates ln(C(n,k)) = ln(n! / (k!(n-k)!)) for non-negative integer arguments
 /// using gamma function evaluation.
 #[inline(always)]
@@ -710,7 +710,7 @@ pub fn ln_choose(n: u64, k: u64) -> f64 {
 }
 
 /// Generic SIMD logarithmic binomial coefficient with compile-time lane count.
-/// 
+///
 /// Computes ln(C(n,k)) for vectors of n and k values using SIMD vectorisation
 /// with arbitrary lane counts determined at compile time.
 #[inline(always)]
@@ -811,7 +811,7 @@ pub fn binomial_cdf_scalar(k: i64, n: u64, p: f64) -> f64 {
 }
 
 /// Core inverse standard normal function for left tail probabilities.
-/// 
+///
 /// Computes Φ⁻¹(p) for probabilities p ∈ (0, 0.5] using Acklam's rational
 /// approximation optimised for the left tail region.
 #[inline(always)]
@@ -851,7 +851,7 @@ pub fn inv_std_normal_core(p: f64) -> f64 {
 /// # Domain and Range
 /// - **Domain**: p ∈ [0, 1]
 /// - **Range**: z ∈ (-∞, ∞)
-/// - **Special cases**: 
+/// - **Special cases**:
 ///   - `p = 0.0` returns `-∞`
 ///   - `p = 1.0` returns `+∞`
 ///   - `p = 0.5` returns `0.0`
@@ -875,7 +875,7 @@ pub fn inv_std_normal(p: f64) -> f64 {
 }
 
 /// Specialised Newton refinement for extreme chi-squared quantile computation.
-/// 
+///
 /// High-precision iterative refinement method specifically optimised for
 /// extreme chi-squared quantiles where standard methods may suffer from
 /// numerical instability. Uses extended iteration counts and tighter
@@ -940,7 +940,7 @@ pub fn chi2_newton_refine_extreme(mut x: f64, a: f64, p: f64) -> f64 {
 }
 
 /// Standard Newton refinement for chi-squared quantile computation.
-/// 
+///
 /// Efficient iterative refinement method for chi-squared distribution quantiles
 /// using safeguarded Newton's method with adaptive step damping. Provides
 /// optimal balance between computational efficiency and numerical accuracy
@@ -1002,7 +1002,7 @@ pub fn chi2_newton_refine(mut x: f64, a: f64, p: f64) -> f64 {
 }
 
 /// Evaluates standard normal cumulative distribution function with high accuracy.
-/// 
+///
 /// Computes the cumulative distribution function Φ(z) of the standard normal
 /// distribution N(0,1) at the specified point z using the complementary error
 /// function for optimal numerical precision. This implementation provides
@@ -1018,7 +1018,7 @@ pub fn normal_cdf_scalar(z: f64) -> f64 {
 }
 
 /// Evaluates standard normal probability density function at given point.
-/// 
+///
 /// Computes the probability density function φ(z) of the standard normal
 /// distribution N(0,1) at the specified point z. This function provides
 /// numerically stable evaluation across the entire real domain with

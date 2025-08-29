@@ -25,17 +25,17 @@ use std::simd::{Mask, Simd};
 
 use minarrow::{Bitmask, BooleanArray, Integer, Numeric};
 
-use crate::errors::KernelError;
-#[cfg(feature = "simd")]
-use crate::kernels::bitmask::simd::{
-    and_masks_simd, in_mask_simd, not_in_mask_simd, not_mask_simd,
-};
 #[cfg(not(feature = "simd"))]
 use crate::kernels::bitmask::std::{and_masks, in_mask, not_in_mask, not_mask};
 use crate::operators::ComparisonOperator;
-use crate::utils::confirm_equal_len;
+use minarrow::enums::error::KernelError;
 #[cfg(feature = "simd")]
-use crate::utils::is_simd_aligned;
+use minarrow::kernels::bitmask::simd::{
+    and_masks_simd, in_mask_simd, not_in_mask_simd, not_mask_simd,
+};
+use minarrow::utils::confirm_equal_len;
+#[cfg(feature = "simd")]
+use minarrow::utils::is_simd_aligned;
 use minarrow::{BitmaskVT, BooleanAVT, CategoricalAVT, StringAVT};
 
 /// Returns a new Bitmask for boolean buffers, all bits cleared (false).
@@ -71,7 +71,7 @@ macro_rules! impl_cmp_numeric {
         ///
         /// # Parameters
         /// - `lhs`: Left-hand side slice for comparison
-        /// - `rhs`: Right-hand side slice for comparison  
+        /// - `rhs`: Right-hand side slice for comparison
         /// - `mask`: Optional validity mask applied after comparison
         /// - `op`: Comparison operator to apply
         ///
@@ -178,42 +178,42 @@ macro_rules! impl_cmp_numeric {
 }
 
 /// Unified numeric comparison dispatch with optional null mask support.
-/// 
+///
 /// High-performance generic comparison function that dispatches to type-specific SIMD implementations
 /// based on runtime type identification. Supports all numeric types with optional null mask filtering
 /// and comprehensive error handling for mismatched lengths and unsupported types.
-/// 
+///
 /// # Type Parameters
 /// - `T`: Numeric type implementing `Numeric + Copy + 'static` (i32, i64, u32, u64, f32, f64)
-/// 
+///
 /// # Parameters
 /// - `lhs`: Left-hand side numeric slice for comparison
 /// - `rhs`: Right-hand side numeric slice for comparison  
 /// - `mask`: Optional validity mask applied after comparison (AND operation)
 /// - `op`: Comparison operator to apply (Equals, NotEquals, LessThan, etc.)
-/// 
+///
 /// # Returns
 /// `Result<BooleanArray<()>, KernelError>` containing comparison results or error details.
-/// 
+///
 /// # Dispatch Strategy
 /// Uses `TypeId` runtime checking to dispatch to optimal type-specific implementations:
 /// - `i32`/`u32`: 32-bit integer SIMD kernels with W32 lane configuration
 /// - `i64`/`u64`: 64-bit integer SIMD kernels with W64 lane configuration  
 /// - `f32`/`f64`: IEEE 754 floating-point SIMD kernels with specialised NaN handling
-/// 
+///
 /// # Error Conditions
 /// - `KernelError::LengthMismatch`: Input slices have different lengths
 /// - `KernelError::InvalidArguments`: Unsupported numeric type (unreachable in practice)
-/// 
+///
 /// # Performance Benefits
 /// - Zero-cost dispatch: Type resolution optimised away at compile time for monomorphic usage
 /// - SIMD acceleration: Delegates to vectorised implementations for maximum throughput
 /// - Memory efficiency: Optional mask processing avoids unnecessary allocations
-/// 
+///
 /// # Example Usage
 /// ```rust,ignore
 /// use simd_kernels::kernels::comparison::{cmp_numeric, ComparisonOperator};
-/// 
+///
 /// let lhs = &[1i32, 2, 3, 4];
 /// let rhs = &[1i32, 1, 4, 3];
 /// let result = cmp_numeric(lhs, rhs, None, ComparisonOperator::Equals)?;
@@ -395,19 +395,19 @@ where
 }
 
 /// Performs vectorised boolean array comparisons with null mask handling.
-/// 
+///
 /// High-performance SIMD-accelerated comparison function for boolean arrays with automatic null
 /// mask merging and operator-specific optimisations. Supports all comparison operators through
 /// efficient bitmask operations with configurable lane counts for architecture-specific tuning.
-/// 
+///
 /// # Type Parameters
 /// - `LANES`: Number of SIMD lanes to process simultaneously
-/// 
+///
 /// # Parameters
 /// - `lhs`: Left-hand side boolean array view as `(array, offset, length)` tuple
 /// - `rhs`: Right-hand side boolean array view as `(array, offset, length)` tuple  
 /// - `op`: Comparison operator (Equals, NotEquals, In, NotIn, IsNull, IsNotNull, etc.)
-/// 
+///
 /// # Returns
 /// `Result<BooleanArray<()>, KernelError>` containing comparison results with merged null semantics.
 pub fn cmp_bool<const LANES: usize>(

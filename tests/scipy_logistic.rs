@@ -14,10 +14,10 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_logistic_tests {
     use super::util::assert_slice_close;
+    use minarrow::vec64;
     use simd_kernels::kernels::scientific::distributions::univariate::logistic::{
         logistic_cdf, logistic_pdf, logistic_quantile,
     };
-    use minarrow::vec64;
 
     #[test]
     fn logistic_pdf_logistic_standard() {

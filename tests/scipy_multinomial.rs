@@ -14,8 +14,8 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_multinomial_tests {
     use super::util::assert_slice_close;
-    use simd_kernels::kernels::scientific::distributions::univariate::multinomial::multinomial_pmf;
     use minarrow::vec64;
+    use simd_kernels::kernels::scientific::distributions::univariate::multinomial::multinomial_pmf;
 
     #[test]
     fn multinomial_pmf_fair_3cat() {

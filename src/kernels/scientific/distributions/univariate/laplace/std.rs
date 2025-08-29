@@ -3,11 +3,11 @@
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
 };
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// Laplace (double-exponential) distribution PDF, null-aware and SIMD-accelerated.
 /// f(x; μ, b) = (1 / (2b)) · exp(−|x − μ| / b)

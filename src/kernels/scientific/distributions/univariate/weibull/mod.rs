@@ -3,8 +3,8 @@
 
 //! # **Weibull Distribution Module** - *SIMD Accelerated Survival Analysis*
 //!
-//! High-performance implementation of the Weibull distribution, fundamental to reliability 
-//! engineering, survival analysis, and extreme value theory. This distribution also has 
+//! High-performance implementation of the Weibull distribution, fundamental to reliability
+//! engineering, survival analysis, and extreme value theory. This distribution also has
 //! broad applications in engineering and life sciences.
 //!
 //! ## Overview
@@ -62,13 +62,13 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Compute the probability density function (PDF) for the Weibull distribution.
 ///
-/// The Weibull distribution is a continuous probability distribution widely used in reliability 
-/// engineering, survival analysis, and extreme value theory. It is particularly valuable for 
-/// modelling time-to-failure data and characterising the life distribution of materials, 
+/// The Weibull distribution is a continuous probability distribution widely used in reliability
+/// engineering, survival analysis, and extreme value theory. It is particularly valuable for
+/// modelling time-to-failure data and characterising the life distribution of materials,
 /// components, and systems.
 ///
 /// ## Mathematical Definition
@@ -188,7 +188,7 @@ mod tests {
     use minarrow::{Bitmask, vec64};
 
     // see "./tests" for scipy test suite
-    
+
     // Helpers
 
     fn mask_vec(bm: &Bitmask) -> Vec<bool> {

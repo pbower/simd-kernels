@@ -26,19 +26,17 @@ use std::collections::HashMap;
 
 use minarrow::{
     Bitmask, BooleanAVT, BooleanArray, CategoricalAVT, CategoricalArray, FloatArray, Integer,
-    IntegerArray, StringAVT, StringArray, Vec64,
+    IntegerArray, StringAVT, StringArray, Vec64, enums::error::KernelError,
+    utils::confirm_equal_len,
 };
 
 #[cfg(feature = "simd")]
 use core::simd::{Mask, Simd};
 
 #[cfg(feature = "simd")]
-use crate::utils::is_simd_aligned;
+use minarrow::utils::is_simd_aligned;
 
-use crate::{
-    errors::KernelError,
-    utils::{confirm_capacity, confirm_equal_len},
-};
+use minarrow::utils::confirm_capacity;
 #[cfg(feature = "datetime")]
 use minarrow::{DatetimeArray, TimeUnit};
 

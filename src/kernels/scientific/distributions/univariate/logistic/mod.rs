@@ -28,12 +28,12 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Compute the probability density function (PDF) for the logistic distribution.
 ///
-/// The logistic distribution is a continuous probability distribution that closely resembles 
-/// the normal distribution but has heavier tails and a simple closed-form cumulative distribution 
+/// The logistic distribution is a continuous probability distribution that closely resembles
+/// the normal distribution but has heavier tails and a simple closed-form cumulative distribution
 /// function. It is widely used in logistic regression, neural networks, and survival analysis.
 ///
 /// ## Mathematical Definition
@@ -162,7 +162,7 @@ mod tests {
     use super::*;
 
     // see "./tests" for scipy test suite
-    
+
     // helpers
 
     fn mask_vec(mask: &Bitmask) -> Vec<bool> {

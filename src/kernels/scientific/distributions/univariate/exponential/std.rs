@@ -3,11 +3,11 @@
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
 };
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// Exponential PDF: f(x|λ) = λ·exp(-λ·x) for x ≥ 0, 0 otherwise.
 /// Returns error if λ ≤ 0 or non-finite.

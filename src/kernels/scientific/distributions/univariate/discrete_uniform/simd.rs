@@ -16,9 +16,9 @@ use std::simd::{
 
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 use crate::utils::bitmask_to_simd_mask;
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// SIMD-accelerated implementation of discrete uniform distribution probability mass function.
 ///

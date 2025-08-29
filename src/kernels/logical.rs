@@ -24,23 +24,23 @@ use std::simd::{LaneCount, SupportedLaneCount};
 #[cfg(feature = "simd")]
 use std::simd::{Mask, Simd, cmp::SimdPartialEq, cmp::SimdPartialOrd, num::SimdFloat};
 
+use minarrow::kernels::arithmetic::string::MAX_DICT_CHECK;
 use minarrow::traits::type_unions::Float;
 use minarrow::{
     Array, Bitmask, BooleanAVT, BooleanArray, CategoricalAVT, Integer, MaskedArray, Numeric,
     NumericArray, StringAVT, TextArray, Vec64,
 };
 
-use crate::config::MAX_DICT_CHECK;
-use crate::errors::KernelError;
 #[cfg(not(feature = "simd"))]
 use crate::kernels::bitmask::dispatch::{and_masks, or_masks, xor_masks};
-#[cfg(feature = "simd")]
-use crate::kernels::bitmask::simd::{and_masks_simd, or_masks_simd, xor_masks_simd};
 use crate::operators::LogicalOperator;
-use crate::utils::confirm_mask_capacity;
+use minarrow::enums::error::KernelError;
+#[cfg(feature = "simd")]
+use minarrow::kernels::bitmask::simd::{and_masks_simd, or_masks_simd, xor_masks_simd};
+use minarrow::utils::confirm_mask_capacity;
 
 #[cfg(feature = "simd")]
-use crate::utils::is_simd_aligned;
+use minarrow::utils::is_simd_aligned;
 use std::any::TypeId;
 
 /// Builds the Boolean result buffer.
@@ -1083,11 +1083,11 @@ where
     let data = if null_mask.is_none() {
         #[cfg(feature = "simd")]
         {
-            crate::kernels::bitmask::simd::not_mask_simd::<LANES>((&arr.data, offset, len))
+            minarrow::kernels::bitmask::simd::not_mask_simd::<LANES>((&arr.data, offset, len))
         }
         #[cfg(not(feature = "simd"))]
         {
-            crate::kernels::bitmask::std::not_mask((&arr.data, offset, len))
+            minarrow::kernels::bitmask::std::not_mask((&arr.data, offset, len))
         }
     } else {
         // clone window – no modifications
@@ -1238,7 +1238,7 @@ mod tests {
         let owned: Vec<&str> = vals.to_vec();
         CategoricalArray::<T>::from_values(owned)
     }
-    //  BETWEEN 
+    //  BETWEEN
 
     #[test]
     fn between_i32_scalar_rhs() {
@@ -1308,7 +1308,7 @@ mod tests {
         assert_bool(&out, &[true, false, false], Some(&[true, false, true]));
     }
 
-    // IN 
+    // IN
 
     #[test]
     fn in_i32_small_rhs() {
@@ -1352,7 +1352,7 @@ mod tests {
         assert_bool(&out, &[false, true, true], None);
     }
 
-    // BETWEEN / IN 
+    // BETWEEN / IN
 
     #[test]
     fn string_between() {
@@ -1479,7 +1479,7 @@ mod tests {
         assert_bool(&out, &[false, true, false], Some(&[false, true, true]));
     }
 
-    // Boolean/Null  
+    // Boolean/Null
 
     #[test]
     fn is_null_and_is_not_null() {
@@ -1579,7 +1579,7 @@ mod tests {
         }
     }
 
-    // all integer types, short and long  
+    // all integer types, short and long
 
     #[test]
     fn in_integers_various_types() {
@@ -1617,7 +1617,7 @@ mod tests {
         assert_bool(&out, &[false, true, false, true], None);
     }
 
-    // empty input edge  
+    // empty input edge
 
     #[test]
     fn between_and_in_empty_inputs() {

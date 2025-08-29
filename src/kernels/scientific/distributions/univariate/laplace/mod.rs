@@ -36,12 +36,12 @@ mod simd;
 #[cfg(not(feature = "simd"))]
 mod std;
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 use minarrow::{Bitmask, FloatArray};
 /// Compute the probability density function (PDF) for the Laplace distribution.
 ///
-/// The Laplace distribution, also known as the double exponential distribution, is a continuous 
-/// distribution characterised by its symmetric shape with exponential decay on both sides of the 
+/// The Laplace distribution, also known as the double exponential distribution, is a continuous
+/// distribution characterised by its symmetric shape with exponential decay on both sides of the
 /// location parameter. It is widely used in robust statistics and signal processing applications.
 ///
 /// ## Mathematical Definition
@@ -70,7 +70,7 @@ use minarrow::{Bitmask, FloatArray};
 /// - Scale parameter is non-positive (b ≤ 0)
 /// - Location parameter is not finite (NaN or infinite)
 /// - Scale parameter is not finite (NaN or infinite)
-/// 
+///
 /// ## Example
 ///
 /// ```rust,ignore
@@ -162,7 +162,7 @@ mod tests {
     use minarrow::{Bitmask, vec64};
 
     // see "./tests" for scipy test suite
-    
+
     // Helpers reused across tests
 
     fn mask_vec(bm: &Bitmask) -> Vec<bool> {

@@ -3,8 +3,8 @@
 
 //! # **Normal Distribution Module** - *Gaussian Distribution, Central Limit Foundation*
 //!
-//! High-performance implementation of the normal (Gaussian) distribution, the cornerstone of modern 
-//! statistics and the foundation of the Central Limit Theorem. This implementation provides 
+//! High-performance implementation of the normal (Gaussian) distribution, the cornerstone of modern
+//! statistics and the foundation of the Central Limit Theorem. This implementation provides
 //! industry-standard accuracy with optimal computational performance.
 //!
 //! ## Usage Examples
@@ -19,7 +19,7 @@
 //!
 //! // Critical values for hypothesis testing
 //! let alpha = vec64![0.001, 0.01, 0.05];  // significance levels
-//! let z_critical = normal_quantile(&alpha.iter().map(|&a| 1.0 - a/2.0).collect::<Vec<_>>(), 
+//! let z_critical = normal_quantile(&alpha.iter().map(|&a| 1.0 - a/2.0).collect::<Vec<_>>(),
 //!                                  0.0, 1.0, None, None).unwrap();
 //!
 //! // Custom normal distribution (μ=100, σ=15)
@@ -33,7 +33,7 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Normal PDF - vectorised, SIMD where available, with Arrow-compatible null handling.
 /// Propagates input nulls and sets output null for any non-finite result.

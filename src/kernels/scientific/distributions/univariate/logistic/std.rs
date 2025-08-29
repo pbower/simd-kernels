@@ -4,10 +4,10 @@
 use minarrow::{Bitmask, FloatArray};
 use std::f64::{INFINITY, NEG_INFINITY};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
 };
+use minarrow::enums::error::KernelError;
 
 use crate::utils::has_nulls;
 

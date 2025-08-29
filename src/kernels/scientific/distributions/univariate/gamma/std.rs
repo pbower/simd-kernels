@@ -25,8 +25,8 @@
 
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::scalar::*;
+use minarrow::enums::error::KernelError;
 
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::distributions::univariate::common::std::{

@@ -23,12 +23,13 @@ use minarrow::{
     Bitmask, BooleanAVT, BooleanArray, FloatArray, Integer, IntegerArray, Length, MaskedArray,
     Offset, StringArray, Vec64,
     aliases::{FloatAVT, IntegerAVT},
+    enums::error::KernelError,
     vec64,
 };
 use num_traits::{Float, Num, NumCast, One, Zero};
 
-use crate::{errors::KernelError, utils::confirm_mask_capacity};
 use minarrow::StringAVT;
+use minarrow::utils::confirm_mask_capacity;
 
 // Helpers
 #[inline(always)]
@@ -153,7 +154,7 @@ where
 
 /// Computes rolling sums over a sliding window for integer data with null-aware semantics.
 ///
-/// Applies a sliding window of configurable size to compute cumulative sums, employing 
+/// Applies a sliding window of configurable size to compute cumulative sums, employing
 /// incremental computation to avoid O(n²) complexity through efficient push-pop operations.
 /// Each position in the output represents the sum of values within the preceding window.
 ///
@@ -722,7 +723,7 @@ pub fn rolling_max_int<T: Ord + Copy + Zero>(
 /// - Rolling minimum values computed with floating-point precision
 /// - Zero values for positions with incomplete windows
 /// - Null mask reflecting window validity and special value handling
-/// 
+///
 /// ## Applications
 /// - **Scientific computing**: Finding minimum values in numerical simulations
 /// - **Signal processing**: Detecting minimum signal levels with high precision

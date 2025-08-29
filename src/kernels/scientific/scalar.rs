@@ -7,7 +7,7 @@
 //! element-wise on arrays of floating-point values. It serves as the computational backbone for
 //! mathematical operations across the simd-kernels crate, for both scalar and SIMD-accelerated
 //! implementations with opt-in Arrow-compatible null masking.
-//! 
+//!
 //! These are the semantic equivalent of *numpy ufuncs* in Python.
 //!
 //! ## Overview
@@ -20,12 +20,11 @@
 //! - **Statistics**: Data transformations and statistical preprocessing
 //! - **Financial Mathematics**: Risk calculations and price transformations
 
-use minarrow::{Bitmask, FloatArray, Vec64};
-use crate::utils::{
-    bitmask_to_simd_mask, is_simd_aligned, simd_mask_to_bitmask, write_global_bitmask_block,
-};
-use std::simd::{LaneCount, SupportedLaneCount};
 use crate::kernels::scientific::erf::erf as erf_fn;
+use crate::utils::{bitmask_to_simd_mask, simd_mask_to_bitmask, write_global_bitmask_block};
+use minarrow::utils::is_simd_aligned;
+use minarrow::{Bitmask, FloatArray, Vec64};
+use std::simd::{LaneCount, SupportedLaneCount};
 
 /// Generates a mapping kernel that returns a FloatArray<f64>,
 /// propagating any input nulls (and never touching lanes that were null).

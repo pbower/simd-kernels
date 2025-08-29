@@ -4,11 +4,11 @@
 //! # Multinomial Distribution
 //!
 //! ****************************************************************************************
-//! ⚠️ Warning: This module has not been fully tested, and is not ready for production use. 
+//! ⚠️ Warning: This module has not been fully tested, and is not ready for production use.
 //! This warning applies to all multivariate kernels in *SIMD-kernels*, which are to be finalised
 //! in an upcoming release.
 //! ****************************************************************************************
-//! 
+//!
 //! The multinomial distribution generalises the binomial distribution to multiple categories,
 //! modelling the probability of observing specific counts across k mutually exclusive outcomes
 //! in n independent trials. Each trial results in exactly one of the k possible outcomes.
@@ -34,9 +34,9 @@ include!(concat!(env!("OUT_DIR"), "/simd_lanes.rs"));
 
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::scalar::ln_gamma;
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// Computes the probability mass function of the multinomial distribution.
 ///
@@ -49,7 +49,7 @@ use crate::utils::has_nulls;
 /// are concatenated:
 /// - **Single observation**: [x₁, x₂, ..., xₖ] (length k)
 /// - **Multiple observations**: [x₁₁, x₁₂, ..., x₁ₖ, x₂₁, x₂₂, ..., x₂ₖ, ...] (length n_rows × k)
-/// 
+///
 /// Each row represents one multinomial observation with counts across all k categories.
 ///
 /// ## Parameters

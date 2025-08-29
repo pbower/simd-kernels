@@ -16,18 +16,19 @@ include!(concat!(env!("OUT_DIR"), "/simd_lanes.rs"));
 
 use std::simd::Simd;
 
+use minarrow::utils::is_simd_aligned;
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::constants::*;
 use crate::kernels::scientific::distributions::univariate::common::simd::{
     dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
 };
+use minarrow::enums::error::KernelError;
 
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
 };
-use crate::utils::{has_nulls, is_simd_aligned};
+use crate::utils::has_nulls;
 
 /// SIMD-accelerated implementation of Cauchy distribution probability density function.
 ///

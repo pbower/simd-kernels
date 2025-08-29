@@ -20,17 +20,14 @@ use std::simd::{
     cmp::{SimdPartialEq, SimdPartialOrd},
 };
 
-use minarrow::{Bitmask, FloatArray};
+use minarrow::{Bitmask, FloatArray, enums::error::KernelError};
 
 use crate::kernels::scientific::distributions::shared::constants::*;
+use crate::kernels::scientific::distributions::univariate::common::simd::{
+    dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
+};
 use crate::kernels::scientific::erf::{erf, erf_simd};
 use crate::utils::has_nulls;
-use crate::{
-    errors::KernelError,
-    kernels::scientific::distributions::univariate::common::simd::{
-        dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
-    },
-};
 
 // TODO: Add alignment check
 

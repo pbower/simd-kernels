@@ -27,13 +27,13 @@
 
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 use crate::{
     kernels::scientific::distributions::univariate::common::std::{
         dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
     },
     utils::has_nulls,
 };
+use minarrow::enums::error::KernelError;
 
 /// Geometric PMF (SciPy convention):
 /// P(X = k) = (1 - p)^(k-1) · p for k = 1,2,…  and P(0) = 0.

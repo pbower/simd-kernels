@@ -3,13 +3,13 @@
 
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::scalar::*;
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
 };
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// Chi-square PDF: f(x; k) = 1/(2^{k/2} Γ(k/2)) x^{k/2-1} e^{-x/2}
 #[cfg(not(feature = "simd"))]

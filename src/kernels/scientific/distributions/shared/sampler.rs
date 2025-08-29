@@ -8,7 +8,7 @@
 
 use minarrow::Vec64;
 use rand::rngs::ThreadRng;
-use rand::{rng, Rng};
+use rand::{Rng, rng};
 use std::f64::consts::PI;
 
 /// Thread-local statistical distribution sampler backed by a high-quality PRNG.
@@ -97,8 +97,14 @@ pub fn sample_standard_normal<R: Rng + ?Sized>(rng: &mut R) -> f64 {
 /// Preconditions: shape > 0, scale > 0.
 #[inline]
 pub fn sample_gamma<R: Rng + ?Sized>(rng: &mut R, shape: f64, scale: f64) -> f64 {
-    assert!(shape.is_finite() && shape > 0.0, "shape must be finite and > 0");
-    assert!(scale.is_finite() && scale > 0.0, "scale must be finite and > 0");
+    assert!(
+        shape.is_finite() && shape > 0.0,
+        "shape must be finite and > 0"
+    );
+    assert!(
+        scale.is_finite() && scale > 0.0,
+        "scale must be finite and > 0"
+    );
 
     // Handle 0 < shape < 1 by boosting to shape+1, then apply a power-law correction.
     if shape < 1.0 {

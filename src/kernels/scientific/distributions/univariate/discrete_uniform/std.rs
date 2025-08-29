@@ -3,8 +3,8 @@
 
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// Discrete uniform PMF (SciPy randint semantics: support = {low, …, high-1}).
 /// P(X=k) = 1/(high−low) for k ∈ [low, high), else 0.

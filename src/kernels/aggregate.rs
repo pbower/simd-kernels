@@ -29,69 +29,17 @@ use std::simd::{
 
 #[cfg(feature = "fast_hash")]
 use ahash::AHashMap;
-use minarrow::traits::type_unions::Float;
 use minarrow::{Bitmask, Vec64};
-use num_traits::{NumCast, One, ToPrimitive, Zero};
+use num_traits::{Float, NumCast, One, ToPrimitive, Zero};
 
 use crate::kernels::sort::{sort_float, total_cmp_f};
+use crate::traits::dense_iter::collect_valid;
 use crate::traits::to_bits::ToBits;
 use crate::utils::has_nulls;
+use minarrow::utils::is_simd_aligned;
 
 #[cfg(feature = "simd")]
-use crate::utils::{bitmask_to_simd_mask, is_simd_aligned};
-
-/// Iterator over non-null values in a slice, using an optional Bitmask.
-struct ValidIter<'a, T> {
-    slice: &'a [T],
-    idx: usize,
-    mask: Option<&'a Bitmask>,
-    len: usize,
-}
-impl<'a, T: Copy> ValidIter<'a, T> {
-    #[inline(always)]
-    fn new(slice: &'a [T], mask: Option<&'a Bitmask>) -> Self {
-        let len = slice.len();
-        Self {
-            slice,
-            idx: 0,
-            mask,
-            len,
-        }
-    }
-}
-impl<'a, T: Copy> Iterator for ValidIter<'a, T> {
-    type Item = T;
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.mask {
-            None => {
-                if self.idx >= self.len {
-                    None
-                } else {
-                    let v = self.slice[self.idx];
-                    self.idx += 1;
-                    Some(v)
-                }
-            }
-            Some(m) => {
-                while self.idx < self.len {
-                    let i = self.idx;
-                    self.idx += 1;
-                    if unsafe { m.get_unchecked(i) } {
-                        return Some(self.slice[i]);
-                    }
-                }
-                None
-            }
-        }
-    }
-}
-
-/// Collects valid (non-null) values from a slice into a Vec64.
-#[inline(always)]
-fn collect_valid<T: Copy>(d: &[T], m: Option<&Bitmask>) -> Vec64<T> {
-    ValidIter::new(d, m).collect()
-}
+use crate::utils::bitmask_to_simd_mask;
 
 // --- SIMD/stat-moments helpers -----------------------------------------------
 
@@ -3305,7 +3253,7 @@ mod tests {
         let d = vec64![-2i64, -4, -8];
         let _ = geometric_mean_int(&d, None, None);
     }
-    
+
     // --- percentile: boundary and empty, floats with mask, p out of range ---
     #[test]
     fn test_percentile_ord_and_f_all_cases() {

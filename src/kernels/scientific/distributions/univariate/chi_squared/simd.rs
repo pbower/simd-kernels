@@ -19,19 +19,16 @@ use std::simd::{
     num::SimdFloat,
 };
 
-use minarrow::{Bitmask, FloatArray};
+use minarrow::{Bitmask, FloatArray, enums::error::KernelError, utils::is_simd_aligned};
 
 use crate::kernels::scientific::distributions::shared::scalar::*;
+use crate::kernels::scientific::distributions::univariate::common::simd::{
+    dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
+};
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
 };
-use crate::utils::{has_nulls, is_simd_aligned};
-use crate::{
-    errors::KernelError,
-    kernels::scientific::distributions::univariate::common::simd::{
-        dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
-    },
-};
+use crate::utils::has_nulls;
 
 /// SIMD-accelerated implementation of chi-squared distribution probability density function.
 ///

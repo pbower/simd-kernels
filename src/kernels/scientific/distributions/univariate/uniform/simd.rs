@@ -3,8 +3,8 @@
 
 //! # **Uniform Distribution SIMD Implementations**
 //!
-//! High-performance SIMD-accelerated implementations of uniform distribution functions optimised 
-//! for Monte Carlo simulation, random sampling, and statistical modelling applications requiring 
+//! High-performance SIMD-accelerated implementations of uniform distribution functions optimised
+//! for Monte Carlo simulation, random sampling, and statistical modelling applications requiring
 //! flat probability distributions over bounded intervals.
 
 include!(concat!(env!("OUT_DIR"), "/simd_lanes.rs"));
@@ -15,33 +15,30 @@ use std::simd::{
     num::SimdFloat,
 };
 
-use minarrow::{Bitmask, FloatArray};
+use minarrow::{Bitmask, FloatArray, enums::error::KernelError, utils::is_simd_aligned};
 
+use crate::kernels::scientific::distributions::univariate::common::simd::masked_univariate_kernel_f64_simd;
 use crate::kernels::scientific::distributions::univariate::common::{
     simd::dense_univariate_kernel_f64_simd,
     std::{dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std},
 };
-use crate::utils::{has_nulls, is_simd_aligned};
-use crate::{
-    errors::KernelError,
-    kernels::scientific::distributions::univariate::common::simd::masked_univariate_kernel_f64_simd,
-};
+use crate::utils::has_nulls;
 
 /// **Uniform Distribution Probability Density Function**
-/// 
-/// Computes the probability density function of the continuous uniform distribution using vectorised 
+///
+/// Computes the probability density function of the continuous uniform distribution using vectorised
 /// SIMD operations where possible, with scalar fallback for compatibility.
-/// 
+///
 /// ## Parameters
-/// 
+///
 /// * `x` - Input data slice of `f64` values where PDF is evaluated
 /// * `a` - Lower bound of uniform distribution, must be finite
 /// * `b` - Upper bound of uniform distribution, must be finite and b > a
 /// * `null_mask` - Optional input null bitmap for handling missing values
 /// * `null_count` - Optional count of null values, enables optimised processing paths
-/// 
+///
 /// ## Returns
-/// 
+///
 /// Returns `Result<FloatArray<f64>, KernelError>` containing:
 /// * **Success**: `FloatArray` with PDF values and appropriate null mask
 /// * **Error**: `KernelError::InvalidArguments` for invalid parameters
@@ -136,20 +133,20 @@ pub fn uniform_pdf_simd(
 }
 
 /// **Uniform Distribution Cumulative Distribution Function** - *SIMD-Accelerated Flat CDF*
-/// 
-/// Computes the cumulative distribution function of the continuous uniform distribution using vectorised 
+///
+/// Computes the cumulative distribution function of the continuous uniform distribution using vectorised
 /// SIMD operations where possible, providing high-precision probability computation for bounded intervals.
 ///
 /// ## Parameters
-/// 
+///
 /// * `x` - Input data slice of `f64` values where CDF is evaluated
 /// * `a` - Lower bound of uniform distribution, must be finite
 /// * `b` - Upper bound of uniform distribution, must be finite and b > a
 /// * `null_mask` - Optional input null bitmap for handling missing values
 /// * `null_count` - Optional count of null values, enables optimised processing paths
-/// 
+///
 /// ## Returns
-/// 
+///
 /// Returns `Result<FloatArray<f64>, KernelError>` containing:
 /// * **Success**: `FloatArray` with CDF values and appropriate null mask
 /// * **Error**: `KernelError::InvalidArguments` for invalid parameters
@@ -252,20 +249,20 @@ pub fn uniform_cdf_simd(
 }
 
 /// **Uniform Distribution Quantile Function** - *SIMD-Accelerated Inverse CDF*
-/// 
-/// Computes the quantile function (inverse CDF) of the continuous uniform distribution using vectorised 
+///
+/// Computes the quantile function (inverse CDF) of the continuous uniform distribution using vectorised
 /// SIMD operations where possible, providing efficient random variate generation and percentile computation.
 ///
 /// ## Parameters
-/// 
+///
 /// * `p` - Input data slice of `f64` probability values where quantile function is evaluated
 /// * `a` - Lower bound of uniform distribution, must be finite
 /// * `b` - Upper bound of uniform distribution, must be finite and b > a
 /// * `null_mask` - Optional input null bitmap for handling missing values
 /// * `null_count` - Optional count of null values, enables optimised processing paths
-/// 
+///
 /// ## Returns
-/// 
+///
 /// Returns `Result<FloatArray<f64>, KernelError>` containing:
 /// * **Success**: `FloatArray` with quantile values and appropriate null mask
 /// * **Error**: `KernelError::InvalidArguments` for invalid parameters

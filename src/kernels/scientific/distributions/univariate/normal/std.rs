@@ -3,11 +3,10 @@
 
 //! # **Normal Distribution Scalar Implementations** - *Foundation for Statistical Computing*
 //!
-//! Scalar (non-SIMD) implementations of normal distribution functions providing the computational 
+//! Scalar (non-SIMD) implementations of normal distribution functions providing the computational
 //! foundation for statistical analysis.
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::constants::*;
 use crate::kernels::scientific::distributions::shared::scalar::normal_quantile_scalar;
 #[cfg(not(feature = "simd"))]
@@ -17,6 +16,7 @@ use crate::kernels::scientific::distributions::univariate::common::std::{
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::erf::erf;
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// Normal PDF (vectorised, SIMD where available), null-aware and Arrow-compliant.
 /// Propagates input nulls and sets output null for any non-finite result.

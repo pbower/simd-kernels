@@ -12,19 +12,19 @@
 //! ```rust,ignore
 //! use minarrow::vec64;
 //! use crate::kernels::scientific::vector::{dot, scale, axpy, l2_norm};
-//! 
+//!
 //! let x = vec64![1.0, 2.0, 3.0, 4.0];
 //! let mut y = vec64![5.0, 6.0, 7.0, 8.0];
-//! 
+//!
 //! // Dot product computation
 //! let result = dot(&x, &y, None, None);
-//! 
+//!
 //! // In-place vector scaling
 //! scale(&mut y, 2.0, None, None);
-//! 
+//!
 //! // Scaled addition: y ← 2.0 * x + y
 //! axpy(4, 2.0, &x, 1, &mut y, 1, None, None)?;
-//! 
+//!
 //! // Euclidean norm
 //! let norm = l2_norm(&x, None, None);
 //! ```
@@ -36,12 +36,15 @@ use std::simd::{Mask, Simd, num::SimdFloat};
 
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 use crate::kernels::aggregate::sum_squares;
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 #[cfg(feature = "simd")]
-use crate::utils::{bitmask_to_simd_mask, is_simd_aligned};
+use crate::utils::bitmask_to_simd_mask;
+
+#[cfg(feature = "simd")]
+use minarrow::utils::is_simd_aligned;
 
 // --- Vector analytics ---
 

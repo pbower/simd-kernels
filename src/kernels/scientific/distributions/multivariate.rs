@@ -4,11 +4,11 @@
 //! # **Multivariate Distributions Module** - *Multivariate Statistical Computing*
 //!
 //! ****************************************************************************************
-//! ⚠️ Warning: This module has not been fully tested, and is not ready for production use. 
+//! ⚠️ Warning: This module has not been fully tested, and is not ready for production use.
 //! This warning applies to all multivariate kernels in *SIMD-kernels*, which are to be finalised
 //! in an upcoming release.
 //! ****************************************************************************************
-//! 
+//!
 //! Multivariate probability distribution kernels providing high-performance
 //! evaluation of probability density functions, cumulative distributions, and random sampling
 //! for complex multivariate statistical models with full BLAS/LAPACK integration.
@@ -27,13 +27,11 @@ use lapack::{dpotrf, dpotrs};
 use minarrow::{Bitmask, FloatArray, Vec64};
 use rand::{Rng, rng};
 
-use crate::{
-    errors::KernelError,
-    kernels::scientific::distributions::{
-        shared::sampler::{Sampler, sample_gamma},
-        shared::{constants::LN_PI, scalar::ln_gamma},
-    },
+use crate::kernels::scientific::distributions::{
+    shared::sampler::{Sampler, sample_gamma},
+    shared::{constants::LN_PI, scalar::ln_gamma},
 };
+use minarrow::enums::error::KernelError;
 
 /// Standard multivariate probability distributions: PDF, log-PDF, and sampling.
 /// Covers all distributions needed for statistical analysis and Bayesian modelling.
@@ -76,9 +74,9 @@ fn ln_multivariate_gamma(d: usize, a: f64) -> f64 {
 
 /// Compute the multivariate normal log-probability density function (log-PDF).
 ///
-/// Evaluates the logarithm of the multivariate normal probability density function for 
-/// observations given mean vector and covariance matrix. This function provides numerically 
-/// stable computation by working directly in log-space, avoiding overflow issues common 
+/// Evaluates the logarithm of the multivariate normal probability density function for
+/// observations given mean vector and covariance matrix. This function provides numerically
+/// stable computation by working directly in log-space, avoiding overflow issues common
 /// with high-dimensional distributions.
 ///
 /// ## Mathematical Definition
@@ -207,7 +205,7 @@ pub fn mvn_logpdf(
 
 /// Compute the multivariate normal probability density function (PDF).
 ///
-/// Evaluates the multivariate normal probability density function by exponentiating 
+/// Evaluates the multivariate normal probability density function by exponentiating
 /// the log-PDF result. For high-dimensional distributions or extreme parameter values,
 /// consider using `mvn_logpdf` directly to avoid numerical overflow.
 ///
@@ -252,8 +250,8 @@ pub fn mvn_pdf(
 
 /// Generate samples from a multivariate normal distribution.
 ///
-/// Draws independent samples from the multivariate normal distribution with 
-/// specified mean vector and covariance matrix using Cholesky decomposition 
+/// Draws independent samples from the multivariate normal distribution with
+/// specified mean vector and covariance matrix using Cholesky decomposition
 /// for transformation of independent standard normal random variables.
 ///
 /// ## Parameters

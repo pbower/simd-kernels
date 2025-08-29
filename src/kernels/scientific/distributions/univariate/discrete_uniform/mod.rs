@@ -8,7 +8,7 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Discrete uniform PMF.
 /// P(X=k) = 1/(high−low+1) for k ∈ [low, high], else 0

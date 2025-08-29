@@ -9,9 +9,8 @@
 
 use std::simd::{LaneCount, Mask, Simd, SupportedLaneCount};
 
-use minarrow::{Bitmask, Vec64};
+use minarrow::{Bitmask, Vec64, utils::is_simd_aligned};
 
-use crate::utils::is_simd_aligned;
 use crate::{
     kernels::scientific::distributions::univariate::common::std::{
         process_scalar_masked_f64_std, process_scalar_masked_u64_std,
@@ -83,7 +82,7 @@ where
 /// High-performance SIMD kernel for null-aware f64→f64 univariate distribution computations.
 ///
 /// Processes arrays with null values using vectorised operations combined with efficient
-/// bitmask-based null propagation. 
+/// bitmask-based null propagation.
 ///
 /// ## SIMD Processing Strategy  
 /// - **Alignment Check**: Verifies 64-byte memory alignment for optimal SIMD performance
@@ -161,8 +160,8 @@ where
 ///
 /// It's for discrete distributions that process integer input values and produce
 /// floating-point probability results.
-/// 
-/// Library functions *(and you can)* use this when you know that your data is dense, to 
+///
+/// Library functions *(and you can)* use this when you know that your data is dense, to
 /// avoid null-mask related conditional checks in the hot loop. We still take a 'has_mask'
 /// for when this is used in a micro-batching context, and it will then ensure the output
 /// receives a mask back with all bits set to *true*.

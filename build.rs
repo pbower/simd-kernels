@@ -33,7 +33,9 @@ fn main() {
             println!("cargo:warning=SIMD_LANES_OVERRIDE applied: {:?}", vals);
             (vals[0], vals[1], vals[2], vals[3])
         } else {
-            panic!("Invalid SIMD_LANES_OVERRIDE. Expected 4 comma-separated integers, e.g., \"64,32,16,8\"");
+            panic!(
+                "Invalid SIMD_LANES_OVERRIDE. Expected 4 comma-separated integers, e.g., \"64,32,16,8\""
+            );
         }
     } else {
         match arch.as_str() {
@@ -97,24 +99,28 @@ fn main() {
 /// Determined at build time based on target architecture capabilities,
 /// or overridden via `SIMD_LANES_OVERRIDE`.
 #[allow(non_upper_case_globals)]
+#[allow(dead_code)]
 pub const W8: usize = {w8};
 
 /// SIMD lane count for 16-bit elements (u16, i16).
 /// Determined at build time based on target architecture capabilities,
 /// or overridden via `SIMD_LANES_OVERRIDE`.
 #[allow(non_upper_case_globals)]
+#[allow(dead_code)]
 pub const W16: usize = {w16};
 
 /// SIMD lane count for 32-bit elements (u32, i32, f32).
 /// Determined at build time based on target architecture capabilities,
 /// or overridden via `SIMD_LANES_OVERRIDE`.
 #[allow(non_upper_case_globals)]
+#[allow(dead_code)]
 pub const W32: usize = {w32};
 
 /// SIMD lane count for 64-bit elements (u64, i64, f64).
 /// Determined at build time based on target architecture capabilities,
 /// or overridden via `SIMD_LANES_OVERRIDE`.
 #[allow(non_upper_case_globals)]
+#[allow(dead_code)]
 pub const W64: usize = {w64};
 "
         ),

@@ -33,7 +33,7 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Computes the probability density function (PDF) of the gamma distribution.
 ///
@@ -70,7 +70,7 @@ use crate::errors::KernelError;
 ///
 /// Returns a `FloatArray<f64>` containing the PDF values, or a `KernelError` if parameters
 /// are invalid (non-positive or non-finite).
-/// 
+///
 /// # Example
 ///
 /// ```rust,ignore

@@ -14,10 +14,10 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_cauchy_tests {
     use super::util::assert_slice_close;
+    use minarrow::vec64;
     use simd_kernels::kernels::scientific::distributions::univariate::cauchy::{
         cauchy_cdf, cauchy_pdf, cauchy_quantile,
     };
-    use minarrow::vec64;
 
     #[test]
     fn cauchy_pdf_standard() {

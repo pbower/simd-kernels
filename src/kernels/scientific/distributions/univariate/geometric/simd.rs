@@ -18,13 +18,10 @@ use std::simd::{
     num::{SimdFloat, SimdUint},
 };
 
-use minarrow::{Bitmask, FloatArray, Vec64};
+use minarrow::{Bitmask, FloatArray, Vec64, enums::error::KernelError, utils::is_simd_aligned};
 
-use crate::utils::{has_nulls, is_simd_aligned, write_global_bitmask_block};
-use crate::{
-    errors::KernelError,
-    utils::{bitmask_to_simd_mask, simd_mask_to_bitmask},
-};
+use crate::utils::{bitmask_to_simd_mask, simd_mask_to_bitmask};
+use crate::utils::{has_nulls, write_global_bitmask_block};
 
 /// SIMD-accelerated implementation of geometric distribution probability mass function.
 ///

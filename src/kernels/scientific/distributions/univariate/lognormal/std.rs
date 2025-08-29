@@ -3,13 +3,13 @@
 
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::distributions::shared::constants::*;
 use crate::kernels::scientific::distributions::shared::scalar::*;
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::erf::erf;
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::distributions::univariate::common::std::{

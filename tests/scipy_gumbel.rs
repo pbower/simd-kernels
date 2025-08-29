@@ -13,10 +13,10 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_gumbel_tests {
     use super::util::assert_slice_close;
+    use minarrow::vec64;
     use simd_kernels::kernels::scientific::distributions::univariate::gumbell::{
         gumbel_cdf, gumbel_pdf, gumbel_quantile,
     };
-    use minarrow::vec64;
     // use simd_kernels::kernels::scientific::distributions::continuous::gumbel::{gumbel_pdf, gumbel_cdf, gumbel_quantile};
 
     #[test]

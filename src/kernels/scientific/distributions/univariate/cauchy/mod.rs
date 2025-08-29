@@ -32,7 +32,7 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Computes the probability density function (PDF) of the Cauchy distribution.
 ///
@@ -146,7 +146,7 @@ pub fn cauchy_cdf(
 ///
 /// ## Returns
 /// `FloatArray<f64>` containing quantile values, with nulls propagated from input mask.
-/// 
+///
 /// ## Errors
 /// Returns `KernelError::InvalidArguments` if scale ≤ 0 or parameters are non-finite.
 ///

@@ -25,14 +25,14 @@
 pub mod simd;
 mod std;
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 use minarrow::{Bitmask, FloatArray};
 
 /// Compute the probability density function (PDF) for the lognormal distribution.
 ///
-/// The lognormal distribution is a continuous probability distribution of a random variable 
-/// whose logarithm follows a normal distribution. It is characterised by its positive support 
-/// and right-skewed shape, making it ideal for modelling multiplicative processes, financial 
+/// The lognormal distribution is a continuous probability distribution of a random variable
+/// whose logarithm follows a normal distribution. It is characterised by its positive support
+/// and right-skewed shape, making it ideal for modelling multiplicative processes, financial
 /// data, and many natural phenomena.
 ///
 /// ## Mathematical Definition
@@ -72,7 +72,7 @@ use minarrow::{Bitmask, FloatArray};
 /// // Standard lognormal distribution (μ=0, σ=1)
 /// let x = vec64![0.1, 0.5, 1.0, 2.0, 5.0];
 /// let pdf = lognormal_pdf(&x, 0.0, 1.0, None, None).unwrap();
-/// ``` 
+/// ```
 ///
 /// ## Applications
 ///

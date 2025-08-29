@@ -38,12 +38,12 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 /// Compute the probability mass function (PMF) for the hypergeometric distribution.
 ///
-/// The hypergeometric distribution models the number of successes in a fixed number of draws 
-/// from a finite population without replacement. This is the discrete analogue of sampling 
-/// without replacement, contrasting with the binomial distribution which assumes sampling 
+/// The hypergeometric distribution models the number of successes in a fixed number of draws
+/// from a finite population without replacement. This is the discrete analogue of sampling
+/// without replacement, contrasting with the binomial distribution which assumes sampling
 /// with replacement or infinite population size.
 ///
 /// ## Mathematical Definition

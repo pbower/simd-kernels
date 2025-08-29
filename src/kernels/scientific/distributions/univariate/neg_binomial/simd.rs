@@ -3,7 +3,7 @@
 
 //! # **Negative Binomial SIMD Implementations** - *Vectorised Discrete Distribution Computing*
 //!
-//! High-performance SIMD-accelerated implementations of negative binomial distribution functions 
+//! High-performance SIMD-accelerated implementations of negative binomial distribution functions
 //! leveraging modern CPU vector instruction sets for optimal throughput on large vectors.
 
 include!(concat!(env!("OUT_DIR"), "/simd_lanes.rs"));
@@ -14,50 +14,50 @@ use std::simd::{Simd, StdFloat, num::SimdUint};
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::scalar::*;
 use crate::kernels::scientific::distributions::univariate::common::simd::{
     dense_univariate_kernel_u64_simd, masked_univariate_kernel_u64_simd,
 };
+use minarrow::enums::error::KernelError;
 
 use crate::utils::has_nulls;
 
 /// **Negative Binomial Distribution Probability Mass Function** - *SIMD-Accelerated Discrete PMF*
-/// 
-/// Computes the probability mass function of the negative binomial distribution using vectorised 
-/// SIMD operations where possible, with automatic scalar fallback for optimal performance in 
+///
+/// Computes the probability mass function of the negative binomial distribution using vectorised
+/// SIMD operations where possible, with automatic scalar fallback for optimal performance in
 /// discrete probability computation and success/failure modelling.
-/// 
+///
 /// ## Mathematical Definition
-/// 
+///
 /// The negative binomial (Pascal) distribution PMF is defined as:
-/// 
+///
 /// ```text
 /// P(X=k|r,p) = C(k+r-1, k) × p^r × (1-p)^k
 /// ```
-/// 
+///
 /// Where:
 /// - `X = k` ∈ ℕ₀: number of failures before r-th success (input values)
 /// - `r` > 0: number of successes required (integer parameter)
 /// - `p` ∈ (0,1): success probability on each trial
 /// - `C(n,k)`: binomial coefficient "n choose k"
-/// 
+///
 /// ## Parameters
-/// 
+///
 /// * `k` - Input data slice of `u64` failure counts where PMF is evaluated
 /// * `r` - Number of successes required, must be positive integer
 /// * `p` - Success probability per trial, must be in (0,1) and finite
 /// * `null_mask` - Optional input null bitmap for handling missing values
 /// * `null_count` - Optional count of null values, enables optimised processing paths
-/// 
+///
 /// ## Returns
-/// 
+///
 /// Returns `Result<FloatArray<f64>, KernelError>` containing:
 /// * **Success**: `FloatArray` with PMF values and appropriate null mask
 /// * **Error**: `KernelError::InvalidArguments` for invalid parameters
 ///
 /// ## Edge Cases & Error Handling
-/// 
+///
 /// - **Invalid parameters**: Returns error if `r = 0`, `p ∉ (0,1)`, or `!p.is_finite()`
 /// - **Null propagation**: Input nulls are preserved in output with corresponding mask bits
 /// - **Empty input**: Returns empty `FloatArray` for zero-length input slices

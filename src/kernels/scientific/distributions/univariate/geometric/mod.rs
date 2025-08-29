@@ -39,12 +39,12 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 /// Compute the probability mass function (PMF) for the geometric distribution.
 ///
-/// The geometric distribution models the number of trials needed to achieve the first success 
-/// in a sequence of independent Bernoulli trials, each with success probability p. This 
-/// implementation follows the SciPy convention with support on {1, 2, 3, ...} representing 
+/// The geometric distribution models the number of trials needed to achieve the first success
+/// in a sequence of independent Bernoulli trials, each with success probability p. This
+/// implementation follows the SciPy convention with support on {1, 2, 3, ...} representing
 /// the number of trials to first success.
 ///
 /// ## Mathematical Definition

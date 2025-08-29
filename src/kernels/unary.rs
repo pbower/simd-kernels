@@ -34,8 +34,8 @@ use num_traits::{Float, Signed};
 #[cfg(not(feature = "fast_hash"))]
 use std::collections::HashMap;
 
-use crate::errors::KernelError;
 use crate::kernels::logical::not_bool;
+use minarrow::enums::error::KernelError;
 
 // Helper
 
@@ -83,16 +83,16 @@ mod simd_impl {
 macro_rules! impl_unary_neg_int {
     ($fn_name:ident, $ty:ty, $lanes:expr) => {
         /// Negates all elements in an integer array.
-        /// 
+        ///
         /// Applies the unary negation operator to each element in the array,
         /// using SIMD operations when available for optimal performance.
-        /// 
+        ///
         /// # Arguments
-        /// 
+        ///
         /// * `window` - Integer array view tuple (array, offset, length)
-        /// 
+        ///
         /// # Returns
-        /// 
+        ///
         /// New integer array containing negated values
         #[inline(always)]
         pub fn $fn_name(window: IntegerAVT<$ty>) -> IntegerArray<$ty> {
@@ -121,16 +121,16 @@ macro_rules! impl_unary_neg_int {
 macro_rules! impl_unary_neg_datetime {
     ($fn_name:ident, $ty:ty, $lanes:expr) => {
         /// Negates all elements in a datetime array.
-        /// 
+        ///
         /// Applies the unary negation operator to each element in the datetime array,
         /// using SIMD operations when available for optimal performance.
-        /// 
+        ///
         /// # Arguments
-        /// 
+        ///
         /// * `window` - Datetime array view tuple (array, offset, length)
-        /// 
+        ///
         /// # Returns
-        /// 
+        ///
         /// New datetime array containing negated values
         #[inline(always)]
         pub fn $fn_name(window: DatetimeAVT<$ty>) -> DatetimeArray<$ty> {
@@ -157,20 +157,20 @@ macro_rules! impl_unary_neg_datetime {
 
 #[cfg(feature = "datetime")]
 /// Generic datetime negation dispatcher.
-/// 
+///
 /// Dispatches to the appropriate type-specific datetime negation function
 /// based on the concrete integer type at runtime.
-/// 
+///
 /// # Type Parameters
-/// 
+///
 /// * `T` - Signed integer type for datetime values
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `window` - Datetime array view tuple (array, offset, length)
-/// 
+///
 /// # Returns
-/// 
+///
 /// New datetime array containing negated values
 #[inline(always)]
 pub fn unary_negate_int_datetime<T>(window: DatetimeAVT<T>) -> DatetimeArray<T>
@@ -200,20 +200,20 @@ impl_unary_neg_int!(unary_neg_i64, i64, W64);
 // Unified entry point
 
 /// Generic integer negation dispatcher.
-/// 
+///
 /// Dispatches to the appropriate type-specific integer negation function
 /// based on the concrete integer type at runtime.
-/// 
+///
 /// # Type Parameters
-/// 
+///
 /// * `T` - Signed integer type
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `window` - Integer array view tuple (array, offset, length)
-/// 
+///
 /// # Returns
-/// 
+///
 /// New integer array containing negated values
 #[inline(always)]
 pub fn unary_negate_int<T>(window: IntegerAVT<T>) -> IntegerArray<T>
@@ -238,40 +238,22 @@ where
 }
 
 /// Negates u32 values and converts them to i32.
-/// 
+///
 /// Applies unary negation to unsigned 32-bit integers and returns
 /// the result as signed 32-bit integers.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `window` - u32 integer array view tuple (array, offset, length)
-/// 
+///
 /// # Returns
-/// 
+///
 /// New i32 integer array containing negated values
 pub fn unary_negate_u32_to_i32(window: IntegerAVT<u32>) -> IntegerArray<i32> {
     let (arr, offset, len) = window;
     let src = &arr.data[offset..offset + len];
     let mut data = prealloc_vec::<i32>(len);
 
-    // There is very little benefit of using SIMD here, and the copy will slow things down.
-    // #[cfg(feature = "simd")]
-    // {
-    //     crate::utils::check_simd_alignment::<u32>(src);
-    //     use core::simd::Simd;
-    //     const LANES: usize = W32;
-    //     let mut i = 0;
-    //     while i + LANES <= len {
-    //         let v = Simd::<u32, LANES>::from_slice(&src[i..i + LANES]).cast::<i32>();
-    //         (Simd::<i32, LANES>::splat(0) - v).copy_to_slice(&mut data[i..i + LANES]);
-    //         i += LANES;
-    //     }
-    //     // Tail often caused by `n % LANES != 0`; uses scalar fallback.
-    //     for j in i..len {
-    //         data[j] = -(src[j] as i32);
-    //     }
-    // }
-    // #[cfg(not(feature = "simd"))]
     for (dst, &v) in data.iter_mut().zip(src) {
         *dst = -(v as i32);
     }
@@ -283,16 +265,16 @@ pub fn unary_negate_u32_to_i32(window: IntegerAVT<u32>) -> IntegerArray<i32> {
 }
 
 /// Negates u64 values and converts them to i64.
-/// 
+///
 /// Applies unary negation to unsigned 64-bit integers and returns
 /// the result as signed 64-bit integers.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `window` - u64 integer array view tuple (array, offset, length)
-/// 
+///
 /// # Returns
-/// 
+///
 /// New i64 integer array containing negated values
 pub fn unary_negate_u64_to_i64(window: IntegerAVT<u64>) -> IntegerArray<i64> {
     let (arr, offset, len) = window;
@@ -330,16 +312,16 @@ pub fn unary_negate_u64_to_i64(window: IntegerAVT<u64>) -> IntegerArray<i64> {
 macro_rules! impl_unary_neg_float {
     ($fname:ident, $ty:ty, $lanes:expr) => {
         /// Negates all elements in a floating-point array.
-        /// 
+        ///
         /// Applies the unary negation operator to each element in the array,
         /// using SIMD operations when available for optimal performance.
-        /// 
+        ///
         /// # Arguments
-        /// 
+        ///
         /// * `window` - Float array view tuple (array, offset, length)
-        /// 
+        ///
         /// # Returns
-        /// 
+        ///
         /// New float array containing negated values
         #[inline(always)]
         pub fn $fname(window: FloatAVT<$ty>) -> FloatArray<$ty> {
@@ -367,20 +349,20 @@ impl_unary_neg_float!(unary_neg_f32, f32, W32);
 impl_unary_neg_float!(unary_neg_f64, f64, W64);
 
 /// Generic floating-point negation dispatcher.
-/// 
+///
 /// Dispatches to the appropriate type-specific negation function
 /// based on the concrete float type at runtime.
-/// 
+///
 /// # Type Parameters
-/// 
+///
 /// * `T` - Floating-point type implementing Float trait
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `window` - Float array view tuple (array, offset, length)
-/// 
+///
 /// # Returns
-/// 
+///
 /// New float array containing negated values
 #[inline(always)]
 pub fn unary_negate_float<T>(window: FloatAVT<T>) -> FloatArray<T>
@@ -407,20 +389,20 @@ where
 }
 
 /// Reverses the character order within each string in a string array.
-/// 
+///
 /// Creates a new string array where each string has its characters reversed,
 /// preserving UTF-8 encoding and null mask patterns.
-/// 
+///
 /// # Type Parameters
-/// 
+///
 /// * `T` - Integer type for string array offsets
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `arr` - String array view tuple (array, offset, length)
-/// 
+///
 /// # Returns
-/// 
+///
 /// New string array with character-reversed strings
 pub fn unary_reverse_str<T: Integer>(arr: StringAVT<T>) -> StringArray<T> {
     let (array, offset, len) = arr;
@@ -471,20 +453,20 @@ pub fn unary_reverse_str<T: Integer>(arr: StringAVT<T>) -> StringArray<T> {
 }
 
 /// Reverses the character order within each string in a categorical array dictionary.
-/// 
-/// Creates a new categorical array where the dictionary strings have their 
+///
+/// Creates a new categorical array where the dictionary strings have their
 /// characters reversed, while preserving the codes and null mask patterns.
-/// 
+///
 /// # Type Parameters
-/// 
+///
 /// * `T` - Integer type implementing Hash for categorical codes
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `arr` - Categorical array view tuple (array, offset, length)
-/// 
+///
 /// # Returns
-/// 
+///
 /// New categorical array with character-reversed dictionary strings
 pub fn unary_reverse_dict<T: Integer + Hash>(arr: CategoricalAVT<T>) -> CategoricalArray<T> {
     let (array, offset, len) = arr;

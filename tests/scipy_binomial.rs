@@ -13,10 +13,10 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_binomial_tests {
     use super::util::assert_slice_close;
+    use minarrow::vec64;
     use simd_kernels::kernels::scientific::distributions::univariate::binomial::{
         binomial_cdf, binomial_pmf, binomial_quantile,
     };
-    use minarrow::vec64;
     // use simd_kernels::kernels::scientific::distributions::discrete::binomial::{binomial_pmf, binomial_cdf, binomial_quantile};
 
     #[test]

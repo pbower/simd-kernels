@@ -32,7 +32,7 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Computes the probability density function (PDF) of the Gumbel distribution.
 ///

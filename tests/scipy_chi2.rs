@@ -13,10 +13,10 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_chi2_tests {
     use super::util::assert_slice_close;
+    use minarrow::vec64;
     use simd_kernels::kernels::scientific::distributions::univariate::chi_squared::{
         chi_square_cdf, chi_square_pdf, chi_square_quantile,
     };
-    use minarrow::vec64;
 
     // TODO: Fix source
     // use simd_kernels::kernels::scientific::distributions::univariate::chi2::{chi2_pdf, chi2_cdf, chi_square_quantile};

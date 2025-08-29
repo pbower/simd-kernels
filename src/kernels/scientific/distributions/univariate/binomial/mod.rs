@@ -34,7 +34,7 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Computes the probability mass function (PMF) of the binomial distribution.
 ///
@@ -60,7 +60,7 @@ use crate::errors::KernelError;
 ///
 /// ## Errors
 /// Returns `KernelError::InvalidArguments` if p ∉ [0, 1] or p is non-finite.
-/// 
+///
 /// ## Example
 /// ```rust,ignore
 /// use simd_kernels::kernels::scientific::distributions::univariate::binomial::binomial_pmf;
