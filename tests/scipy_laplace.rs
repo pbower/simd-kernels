@@ -14,10 +14,10 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_laplace_tests {
     use super::util::assert_slice_close;
+    use minarrow::vec64;
     use simd_kernels::kernels::scientific::distributions::univariate::laplace::{
         laplace_cdf, laplace_pdf, laplace_quantile,
     };
-    use minarrow::vec64;
 
     #[test]
     fn laplace_pdf_laplace_standard() {

@@ -4,7 +4,7 @@
 //! # **Matrix Operations Kernels Module** - *Linear Algebra and Numerical Computing*
 //!
 //! ****************************************************************************************
-//! ⚠️ Warning: This module has not been fully tested, and is not ready for production use. 
+//! ⚠️ Warning: This module has not been fully tested, and is not ready for production use.
 //! This warning applies to all multivariate kernels in *SIMD-kernels*, which are to be finalised
 //! in an upcoming release.
 //! ****************************************************************************************
@@ -15,7 +15,7 @@ use minarrow::{Array, FloatArray};
 use crate::kernels::aggregate::reduce_min_max_f64;
 use crate::kernels::scientific::blas_lapack::{blocked_gemm, gemv};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Matrix–vector product: y ← alpha·A·x + beta·y (column-major).
 ///

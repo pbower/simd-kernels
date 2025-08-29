@@ -20,19 +20,16 @@ use std::simd::{
     num::{SimdFloat, SimdUint},
 };
 
-use minarrow::{Bitmask, FloatArray, Vec64};
+use minarrow::{Bitmask, FloatArray, Vec64, enums::error::KernelError, utils::is_simd_aligned};
 
 use crate::kernels::scientific::distributions::shared::scalar::*;
+use crate::kernels::scientific::distributions::univariate::common::simd::{
+    dense_univariate_kernel_u64_simd, masked_univariate_kernel_u64_simd,
+};
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_u64_std, masked_univariate_kernel_u64_std,
 };
-use crate::utils::{bitmask_to_simd_mask, has_nulls, is_simd_aligned};
-use crate::{
-    errors::KernelError,
-    kernels::scientific::distributions::univariate::common::simd::{
-        dense_univariate_kernel_u64_simd, masked_univariate_kernel_u64_simd,
-    },
-};
+use crate::utils::{bitmask_to_simd_mask, has_nulls};
 
 /// SIMD-accelerated implementation of hypergeometric distribution probability mass function.
 ///
@@ -59,7 +56,7 @@ use crate::{
 /// - 0 ≤ K ≤ N - success states cannot exceed population
 /// - 0 ≤ n ≤ N - cannot draw more than population
 /// - max(0, n+K-N) ≤ k ≤ min(n, K) - logical sampling constraints
-/// 
+///
 /// ## Errors
 /// - `KernelError::InvalidArguments`: When population = 0, success > population, or draws > population
 ///

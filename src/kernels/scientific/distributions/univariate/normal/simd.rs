@@ -3,7 +3,7 @@
 
 //! # **Normal Distribution SIMD Implementations** - *Vectorised Statistical Foundation*
 //!
-//! High-performance SIMD-accelerated implementations of normal distribution functions leveraging 
+//! High-performance SIMD-accelerated implementations of normal distribution functions leveraging
 //! modern CPU vector instructions for maximum throughput on large statistical datasets.
 //!
 //! ## SIMD Vector Lane Configuration
@@ -16,30 +16,30 @@ use std::simd::{Simd, StdFloat};
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::constants::*;
 use crate::kernels::scientific::distributions::univariate::common::simd::{
     dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
 };
+use minarrow::enums::error::KernelError;
 
 use crate::kernels::scientific::erf::{erf, erf_simd};
 use crate::utils::has_nulls;
 
 /// **Normal Distribution Probability Density Function** - *SIMD-Accelerated Gaussian PDF*
-/// 
+///
 /// Computes the probability density function of the normal distribution using vectorised SIMD operations
 /// where possible, with scalar fallback for compatibility.
-/// 
+///
 /// ## Parameters
-/// 
+///
 /// * `x` - Input data slice of `f64` values where PDF is evaluated
 /// * `mean` - Normal distribution mean (μ), must be finite
 /// * `std` - Normal distribution standard deviation (σ), must be positive and finite
 /// * `null_mask` - Optional input null bitmap for handling missing values
 /// * `null_count` - Optional count of null values, enables optimised processing paths
-/// 
+///
 /// ## Returns
-/// 
+///
 /// Returns `Result<FloatArray<f64>, KernelError>` containing:
 /// * **Success**: `FloatArray` with PDF values and appropriate null mask
 /// * **Error**: `KernelError::InvalidArguments` for invalid parameters
@@ -109,20 +109,20 @@ pub fn normal_pdf_simd(
 }
 
 /// **Normal Distribution Cumulative Distribution Function** - *SIMD-Accelerated Gaussian CDF*
-/// 
-/// Computes the cumulative distribution function of the normal distribution using vectorised error function 
+///
+/// Computes the cumulative distribution function of the normal distribution using vectorised error function
 /// evaluation with SIMD acceleration where possible, providing high-precision probability computation.
-/// 
+///
 /// ## Parameters
-/// 
+///
 /// * `x` - Input data slice of `f64` values where CDF is evaluated
 /// * `mean` - Normal distribution mean (μ), must be finite
 /// * `std` - Normal distribution standard deviation (σ), must be positive and finite
 /// * `null_mask` - Optional input null bitmap for handling missing values
 /// * `null_count` - Optional count of null values, enables optimised processing paths
-/// 
+///
 /// ## Returns
-/// 
+///
 /// Returns `Result<FloatArray<f64>, KernelError>` containing:
 /// * **Success**: `FloatArray` with CDF values and appropriate null mask
 /// * **Error**: `KernelError::InvalidArguments` for invalid parameters

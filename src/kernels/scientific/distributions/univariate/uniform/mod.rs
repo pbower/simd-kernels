@@ -3,7 +3,7 @@
 
 //! # **Uniform Distribution Module** - *Constant Density, Maximum Entropy*
 //!
-//! High-performance implementation of the continuous uniform distribution, providing the foundation 
+//! High-performance implementation of the continuous uniform distribution, providing the foundation
 //! for random number generation, Monte Carlo methods, and maximum entropy probability modelling.
 //!
 //! ## Statistical Applications
@@ -37,7 +37,7 @@ mod simd;
 #[cfg(not(feature = "simd"))]
 mod std;
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 use minarrow::{Bitmask, FloatArray};
 
 /// Uniform PDF: f(x|a,b) = 1/(b-a) for x in [a, b], 0 otherwise.
@@ -233,7 +233,7 @@ mod tests {
         assert!(arr.data[1].is_nan() && !m[1]); // masked-out input
         assert_close(arr.data[2], A + 0.9, 1e-15); // 0.3 inside
         assert_close(arr.data[3], B, 1e-15); // p == 1
-        assert!(arr.data[4].is_nan() && m[4]); // >1 → NaN
+        assert!(arr.data[4].is_nan() && m[4]); // >1 -> NaN
     }
 
     // Error handling & empty input

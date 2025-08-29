@@ -13,19 +13,16 @@ use std::simd::{
     cmp::{SimdPartialEq, SimdPartialOrd},
 };
 
-use minarrow::{Bitmask, FloatArray};
+use minarrow::{Bitmask, FloatArray, enums::error::KernelError, utils::is_simd_aligned};
 
+use crate::kernels::scientific::distributions::univariate::common::simd::{
+    dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
+};
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
 };
-use crate::{
-    errors::KernelError,
-    kernels::scientific::distributions::univariate::common::simd::{
-        dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
-    },
-};
 
-use crate::utils::{has_nulls, is_simd_aligned};
+use crate::utils::has_nulls;
 
 /// SIMD-accelerated implementation of exponential distribution probability density function.
 ///
@@ -283,7 +280,7 @@ pub fn exponential_quantile_simd(
             let (data, mask_out) = dense_univariate_kernel_f64_simd::<N, _, _>(
                 p,
                 has_mask,
-                // SIMD body: pure math (ln(0)→inf, ln(neg)→NaN, ln(1)→0)
+                // SIMD body: pure math (ln(0)->inf, ln(neg)->NaN, ln(1)->0)
                 simd_body,
                 scalar_body,
             );

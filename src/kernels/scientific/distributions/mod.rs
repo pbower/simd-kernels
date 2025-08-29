@@ -35,16 +35,16 @@
 //! - **Memory efficiency**: Zero-copy operations where mathematically valid
 //!
 //! ### Null Value Philosophy
-//! Rather than assume, we choose to recognise inf and NaN as valid float values 
-//! (consistent with Apache Arrow semantics), leaving it to the user to subsequently 
-//! treat them as nulls if they wish, given that there are numerical scenarios where 
+//! Rather than assume, we choose to recognise inf and NaN as valid float values
+//! (consistent with Apache Arrow semantics), leaving it to the user to subsequently
+//! treat them as nulls if they wish, given that there are numerical scenarios where
 //! they represent information gain. This approach avoids computational overhead in
 //! the hot path whilst preserving mathematical correctness for edge cases.
 //!
 //! ## Numerical Precision and Stability
 //! All distribution implementations prioritise numerical accuracy across parameter ranges.
 //! See `./tests` for any specific tolerance requirements, where it is measured against Scipy.
-//! Whilst these pass on the development machine, platform specific difference may impact your 
+//! Whilst these pass on the development machine, platform specific difference may impact your
 //! test results, and thus one should keep this in mind when evaluating this library's fit for your use case.
 //!
 //! ## Disclaimer

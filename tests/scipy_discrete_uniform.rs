@@ -13,10 +13,10 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_discrete_uniform_tests {
     use super::util::assert_slice_close;
+    use minarrow::vec64;
     use simd_kernels::kernels::scientific::distributions::univariate::discrete_uniform::{
         discrete_uniform_cdf, discrete_uniform_pmf, discrete_uniform_quantile,
     };
-    use minarrow::vec64;
     // use simd_kernels::kernels::scientific::distributions::discrete::discrete_uniform::{discrete_uniform_pmf, discrete_uniform_cdf, discrete_uniform_quantile};
 
     #[test]

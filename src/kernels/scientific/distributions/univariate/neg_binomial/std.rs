@@ -3,19 +3,19 @@
 
 //! # **Negative Binomial Scalar Implementations** - *CPU-Optimised Discrete Statistics*
 //!
-//! Scalar (non-SIMD) implementations of negative binomial distribution functions optimised for 
-//! numerical stability and computational efficiency. These implementations serve as the foundation 
+//! Scalar (non-SIMD) implementations of negative binomial distribution functions optimised for
+//! numerical stability and computational efficiency. These implementations serve as the foundation
 //! for SIMD acceleration and provide reliable fallback behaviour.
 
 use std::f64;
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::scalar::*;
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_u64_std, masked_univariate_kernel_u64_std,
 };
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 use minarrow::{Bitmask, FloatArray, Vec64};
 
 /// Negative Binomial PMF (Pascal distribution, number of failures before r-th success)

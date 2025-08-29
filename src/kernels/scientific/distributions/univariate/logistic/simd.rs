@@ -22,17 +22,18 @@ use std::simd::{
     num::SimdFloat,
 };
 
+use minarrow::utils::is_simd_aligned;
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::univariate::common::simd::{
     dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
 };
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
 };
+use minarrow::enums::error::KernelError;
 
-use crate::utils::{has_nulls, is_simd_aligned};
+use crate::utils::has_nulls;
 
 /// SIMD-accelerated implementation of logistic distribution probability density function.
 ///
@@ -174,8 +175,8 @@ pub fn logistic_pdf_simd(
 ///
 /// ## Special Cases and Boundary Conditions
 /// - **x = μ**: CDF equals 0.5 (median point)
-/// - **x → -∞**: CDF approaches 0
-/// - **x → +∞**: CDF approaches 1
+/// - **x -> -∞**: CDF approaches 0
+/// - **x -> +∞**: CDF approaches 1
 /// - **S-shaped curve**: Characteristic sigmoid shape with inflection at x = μ
 /// - **Invalid parameters**: Returns error for s ≤ 0 or non-finite parameters
 ///

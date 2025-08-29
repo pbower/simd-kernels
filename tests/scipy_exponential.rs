@@ -14,10 +14,10 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_exponential_tests {
     use super::util::assert_slice_close;
+    use minarrow::vec64;
     use simd_kernels::kernels::scientific::distributions::univariate::exponential::{
         exponential_cdf, exponential_pdf, exponential_quantile,
     };
-    use minarrow::vec64;
 
     #[test]
     fn exponential_pdf_rate_0_5() {

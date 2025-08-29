@@ -23,12 +23,13 @@ use minarrow::{
     Bitmask, BooleanAVT, BooleanArray, FloatArray, Integer, IntegerArray, Length, MaskedArray,
     Offset, StringArray, Vec64,
     aliases::{FloatAVT, IntegerAVT},
+    enums::error::KernelError,
     vec64,
 };
 use num_traits::{Float, Num, NumCast, One, Zero};
 
-use crate::{errors::KernelError, utils::confirm_mask_capacity};
 use minarrow::StringAVT;
+use minarrow::utils::confirm_mask_capacity;
 
 // Helpers
 #[inline(always)]
@@ -153,7 +154,7 @@ where
 
 /// Computes rolling sums over a sliding window for integer data with null-aware semantics.
 ///
-/// Applies a sliding window of configurable size to compute cumulative sums, employing 
+/// Applies a sliding window of configurable size to compute cumulative sums, employing
 /// incremental computation to avoid O(n²) complexity through efficient push-pop operations.
 /// Each position in the output represents the sum of values within the preceding window.
 ///
@@ -722,7 +723,7 @@ pub fn rolling_max_int<T: Ord + Copy + Zero>(
 /// - Rolling minimum values computed with floating-point precision
 /// - Zero values for positions with incomplete windows
 /// - Null mask reflecting window validity and special value handling
-/// 
+///
 /// ## Applications
 /// - **Scientific computing**: Finding minimum values in numerical simulations
 /// - **Signal processing**: Detecting minimum signal levels with high precision
@@ -1984,17 +1985,17 @@ mod tests {
     fn test_rolling_sum_int_edge_windows() {
         let arr = IntegerArray::<i32>::from_slice(&[1, 2, 3, 4, 5]);
 
-        // window = 0 → all zeros + mask all false
+        // window = 0 -> all zeros + mask all false
         let r0 = rolling_sum_int((&arr, 0, arr.len()), 0);
         assert_eq!(r0.data.as_slice(), &[0, 0, 0, 0, 0]);
         assert_eq!(r0.null_mask.as_ref().unwrap().all_unset(), true);
 
-        // window = 1 → identity
+        // window = 1 -> identity
         let r1 = rolling_sum_int((&arr, 0, arr.len()), 1);
         assert_eq!(r1.data.as_slice(), &[1, 2, 3, 4, 5]);
         assert!(r1.null_mask.as_ref().unwrap().all_set());
 
-        // window > len → all zero + all false
+        // window > len -> all zero + all false
         let r_large = rolling_sum_int((&arr, 0, arr.len()), 10);
         assert_eq!(r_large.data.as_slice(), &[0, 0, 0, 0, 0]);
         assert_eq!(r_large.null_mask.as_ref().unwrap().all_unset(), true);
@@ -2007,9 +2008,9 @@ mod tests {
         arr.null_mask = Some(bm(&[true, true, false, true]));
         let r = rolling_sum_float((&arr, 0, arr.len()), 2);
         //   i=0: <full-window, 0.0, false>
-        //   i=1: first full-window → cleared → 0.0, false
-        //   i=2: window contains null → mask=false, but value = 2.0
-        //   i=3: window contains null → mask=false, but value = 4.0
+        //   i=1: first full-window -> cleared -> 0.0, false
+        //   i=2: window contains null -> mask=false, but value = 2.0
+        //   i=3: window contains null -> mask=false, but value = 4.0
         expect_float(
             &r,
             &[0.0, 0.0, 2.0, 4.0],
@@ -2023,7 +2024,7 @@ mod tests {
         let mut b = BooleanArray::from_slice(&[true, false, true, true]);
         b.null_mask = Some(bm(&[true, false, true, true]));
         let r = rolling_sum_bool((&b, 0, b.len()), 2);
-        // windows [t,f], [f,t], [t,t] → only last window is all non-null
+        // windows [t,f], [f,t], [t,t] -> only last window is all non-null
         expect_int(&r, &[0, 0, 1, 2], &[false, false, false, true]);
     }
 
@@ -2032,7 +2033,7 @@ mod tests {
         let mut arr = StringArray::<u32>::from_slice(&["x", "y", "z"]);
         arr.null_mask = Some(bm(&[true, false, true])); // y is null
         let lag1 = lag_str((&arr, 0, arr.len()), 1).unwrap();
-        assert_eq!(lag1.get(0), None); // no source → null
+        assert_eq!(lag1.get(0), None); // no source -> null
         assert_eq!(lag1.get(1), Some("x"));
         assert_eq!(lag1.get(2), None); // source was null
         let m = lag1.null_mask.unwrap();

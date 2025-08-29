@@ -27,13 +27,13 @@
 
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 use crate::{
     kernels::scientific::distributions::univariate::common::std::{
         dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
     },
     utils::has_nulls,
 };
+use minarrow::enums::error::KernelError;
 
 /// Geometric PMF (SciPy convention):
 /// P(X = k) = (1 - p)^(k-1) · p for k = 1,2,…  and P(0) = 0.
@@ -56,7 +56,7 @@ pub fn geometric_pmf_std(
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    // Degenerate p == 1 → pmf(k) = 1_{k==1}
+    // Degenerate p == 1 -> pmf(k) = 1_{k==1}
     if p == 1.0 {
         let mut out = Vec64::with_capacity(len);
         if !has_nulls(null_count, null_mask) {
@@ -139,7 +139,7 @@ pub fn geometric_cdf_std(
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    // Degenerate p == 1 → CDF(k) = 0 if k==0 else 1
+    // Degenerate p == 1 -> CDF(k) = 0 if k==0 else 1
     if p == 1.0 {
         let mut out = Vec64::with_capacity(len);
         if !has_nulls(null_count, null_mask) {

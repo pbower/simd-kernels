@@ -98,7 +98,7 @@ pub fn process_scalar_masked_f64_std<FScalar>(
     }
 }
 
-/// Dense kernel helper for u64→f64 kernels.
+/// Dense kernel helper for u64->f64 kernels.
 ///
 /// # Parameters
 /// - `x`:      input `u64` data
@@ -129,7 +129,7 @@ where
     (out, out_mask)
 }
 
-/// Null‐aware masked kernel helper for u64→f64 kernels.
+/// Null‐aware masked kernel helper for u64->f64 kernels.
 ///
 /// Propagates the input mask and leaves any “invalid” (null) lanes as NULL;
 /// lanes that are in the mask but produce a non‐finite result in the scalar
@@ -152,7 +152,7 @@ where
     (out, out_mask)
 }
 
-/// Processes the scalar section for masked `u64→f64` kernels.
+/// Processes the scalar section for masked `u64->f64` kernels.
 ///
 /// # Safety
 /// Uses unchecked access for performance within validated ranges.

@@ -18,13 +18,10 @@ use std::simd::{
     num::{SimdFloat, SimdUint},
 };
 
-use minarrow::{Bitmask, FloatArray, Vec64};
+use minarrow::{Bitmask, FloatArray, Vec64, enums::error::KernelError, utils::is_simd_aligned};
 
-use crate::utils::{has_nulls, is_simd_aligned, write_global_bitmask_block};
-use crate::{
-    errors::KernelError,
-    utils::{bitmask_to_simd_mask, simd_mask_to_bitmask},
-};
+use crate::utils::{bitmask_to_simd_mask, simd_mask_to_bitmask};
+use crate::utils::{has_nulls, write_global_bitmask_block};
 
 /// SIMD-accelerated implementation of geometric distribution probability mass function.
 ///
@@ -288,7 +285,7 @@ pub fn geometric_cdf_simd(
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    // Degenerate p == 1 → CDF(k) = 0 if k==0 else 1
+    // Degenerate p == 1 -> CDF(k) = 0 if k==0 else 1
     if p == 1.0 {
         let mut out = Vec64::with_capacity(len);
         if !has_nulls(null_count, null_mask) {
@@ -572,7 +569,7 @@ pub fn geometric_quantile_simd(
 
                 // base result
                 let mut rv = if p_succ == 1.0 {
-                    // degenerate-at-1 - q<1 → 1, q==1 → +∞
+                    // degenerate-at-1 - q<1 -> 1, q==1 -> +∞
                     let ones = Simd::<f64, N>::splat(1.0);
                     let infs = Simd::<f64, N>::splat(f64::INFINITY);
                     at1.select(infs, ones)
@@ -597,7 +594,7 @@ pub fn geometric_quantile_simd(
             return Ok(FloatArray::from_vec64(out, None));
         }
 
-        // unaligned → scalar
+        // unaligned -> scalar
         for &q in pv {
             out.push(scalar_body(q));
         }
@@ -651,11 +648,11 @@ pub fn geometric_quantile_simd(
                 at1.select(Simd::<f64, N>::splat(f64::INFINITY), with0)
             };
 
-            // domain invalid → NaN
+            // domain invalid -> NaN
             let invalid = is_nan | oob;
             rv = invalid.select(Simd::<f64, N>::splat(f64::NAN), rv);
 
-            // apply null mask: null lanes → NaN, propagate mask unchanged
+            // apply null mask: null lanes -> NaN, propagate mask unchanged
             let res_v = lane_mask.select(rv, Simd::<f64, N>::splat(f64::NAN));
             out.extend_from_slice(res_v.as_array());
 
@@ -682,7 +679,7 @@ pub fn geometric_quantile_simd(
         });
     }
 
-    // unaligned masked → scalar per element
+    // unaligned masked -> scalar per element
     for idx in 0..len {
         if !mask_ref.get(idx) {
             out.push(f64::NAN);

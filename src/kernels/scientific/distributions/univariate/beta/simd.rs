@@ -6,12 +6,12 @@
 //! High-performance SIMD-accelerated implementations of beta distribution functions
 //! utilising vectorised operations for bulk computations on 64-byte aligned data.
 
+use minarrow::utils::is_simd_aligned;
 use minarrow::{Bitmask, FloatArray, Vec64};
 use std::simd::num::SimdFloat;
 use std::simd::prelude::{SimdPartialEq, SimdPartialOrd};
 use std::simd::{Simd, StdFloat};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::scalar::*;
 use crate::kernels::scientific::distributions::univariate::common::simd::{
     dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
@@ -19,7 +19,8 @@ use crate::kernels::scientific::distributions::univariate::common::simd::{
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
 };
-use crate::utils::{has_nulls, is_simd_aligned};
+use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// SIMD-accelerated implementation of beta distribution probability density function.
 ///
@@ -156,7 +157,6 @@ pub fn beta_pdf_simd(
 }
 
 /// SIMD-accelerated implementation of beta distribution cumulative distribution function.
-
 use core::simd::{LaneCount, Mask, SupportedLaneCount};
 
 #[inline(always)]
@@ -249,7 +249,7 @@ where
 
     // Direct branch: I_x(a,b) = front(a,b,x) * betacf(a,b,x)
     let res_direct = {
-        let front = front_factor::<N>(a, b, x_clamped, ln_beta_ab, /*div=*/a);
+        let front = front_factor::<N>(a, b, x_clamped, ln_beta_ab, /*div=*/ a);
         let cf = betacf_simd::<N>(a, b, x_clamped);
         front * cf
     };
@@ -257,7 +257,7 @@ where
     // Complementary branch: 1 - front(b,a,1-x) * betacf(b,a,1-x)
     let res_compl = {
         let xm = one - x_clamped;
-        let front = front_factor::<N>(b, a, xm, ln_beta_ab, /*div=*/b);
+        let front = front_factor::<N>(b, a, xm, ln_beta_ab, /*div=*/ b);
         let cf = betacf_simd::<N>(b, a, xm);
         one - front * cf
     };

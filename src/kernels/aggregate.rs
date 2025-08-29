@@ -29,69 +29,17 @@ use std::simd::{
 
 #[cfg(feature = "fast_hash")]
 use ahash::AHashMap;
-use minarrow::traits::type_unions::Float;
 use minarrow::{Bitmask, Vec64};
-use num_traits::{NumCast, One, ToPrimitive, Zero};
+use num_traits::{Float, NumCast, One, ToPrimitive, Zero};
 
 use crate::kernels::sort::{sort_float, total_cmp_f};
+use crate::traits::dense_iter::collect_valid;
 use crate::traits::to_bits::ToBits;
 use crate::utils::has_nulls;
+use minarrow::utils::is_simd_aligned;
 
 #[cfg(feature = "simd")]
-use crate::utils::{bitmask_to_simd_mask, is_simd_aligned};
-
-/// Iterator over non-null values in a slice, using an optional Bitmask.
-struct ValidIter<'a, T> {
-    slice: &'a [T],
-    idx: usize,
-    mask: Option<&'a Bitmask>,
-    len: usize,
-}
-impl<'a, T: Copy> ValidIter<'a, T> {
-    #[inline(always)]
-    fn new(slice: &'a [T], mask: Option<&'a Bitmask>) -> Self {
-        let len = slice.len();
-        Self {
-            slice,
-            idx: 0,
-            mask,
-            len,
-        }
-    }
-}
-impl<'a, T: Copy> Iterator for ValidIter<'a, T> {
-    type Item = T;
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.mask {
-            None => {
-                if self.idx >= self.len {
-                    None
-                } else {
-                    let v = self.slice[self.idx];
-                    self.idx += 1;
-                    Some(v)
-                }
-            }
-            Some(m) => {
-                while self.idx < self.len {
-                    let i = self.idx;
-                    self.idx += 1;
-                    if unsafe { m.get_unchecked(i) } {
-                        return Some(self.slice[i]);
-                    }
-                }
-                None
-            }
-        }
-    }
-}
-
-/// Collects valid (non-null) values from a slice into a Vec64.
-#[inline(always)]
-fn collect_valid<T: Copy>(d: &[T], m: Option<&Bitmask>) -> Vec64<T> {
-    ValidIter::new(d, m).collect()
-}
+use crate::utils::bitmask_to_simd_mask;
 
 // --- SIMD/stat-moments helpers -----------------------------------------------
 
@@ -1720,7 +1668,7 @@ macro_rules! impl_skew_kurt_float {
                 return Some(pop_excess);
             }
 
-            // n < 4 → unbiased formula undefined; fall back to population value
+            // n < 4 -> unbiased formula undefined; fall back to population value
             if n < 4 {
                 return Some(pop_excess);
             }
@@ -2949,7 +2897,7 @@ mod tests {
     #[test]
     fn test_iqr_f64() {
         let dataf = vec64![10.0f64, 20.0, 30.0, 40.0, 50.0];
-        // p*(n−1) rounding definition, Q3=40, Q1=20 → IQR=20
+        // p*(n−1) rounding definition, Q3=40, Q1=20 -> IQR=20
         assert_eq!(iqr_f(&dataf, None, None, true), Some(20.0));
     }
     #[test]
@@ -3305,7 +3253,7 @@ mod tests {
         let d = vec64![-2i64, -4, -8];
         let _ = geometric_mean_int(&d, None, None);
     }
-    
+
     // --- percentile: boundary and empty, floats with mask, p out of range ---
     #[test]
     fn test_percentile_ord_and_f_all_cases() {
@@ -3368,7 +3316,7 @@ mod tests {
 
     #[test]
     fn test_skewness_kurtosis_dense() {
-        // Data 1..=5 → mean 3, symmetric
+        // Data 1..=5 -> mean 3, symmetric
         // population skewness = 0, population excess kurtosis = -1.3
         // sample skewness = 0, sample excess kurtosis = -1.2
         let d_f64 = vec64![1.0f64, 2.0, 3.0, 4.0, 5.0];
@@ -3444,7 +3392,7 @@ mod tests {
 
     #[test]
     fn test_skewness_kurtosis_masked() {
-        // Mask out 1 & 5 → [2,3,4]
+        // Mask out 1 & 5 -> [2,3,4]
         // population skewness = 0, population & sample excess kurtosis = -1.5
         let data = vec64![1i32, 2, 3, 4, 5];
         let mask = mask_from_bools(&[false, true, true, true, false]);
@@ -3474,7 +3422,7 @@ mod tests {
 
     #[test]
     fn test_skewness_kurtosis_constant_none() {
-        // Variance zero → expect None
+        // Variance zero -> expect None
         let d = vec64![7u32; 5];
         assert_eq!(skewness_u32(&d, None, None, false), None);
         assert_eq!(kurtosis_u32(&d, None, None, false), None);

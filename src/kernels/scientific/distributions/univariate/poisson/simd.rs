@@ -10,6 +10,8 @@ use std::simd::Mask;
 use std::simd::cmp::SimdPartialEq;
 use std::simd::{Simd, StdFloat, num::SimdUint};
 
+use minarrow::enums::error::KernelError;
+use minarrow::utils::is_simd_aligned;
 use minarrow::{Bitmask, FloatArray, Vec64};
 
 use crate::kernels::scientific::distributions::shared::scalar::*;
@@ -22,36 +24,35 @@ use crate::kernels::scientific::distributions::univariate::common::std::{
 use crate::utils::{
     bitmask_to_simd_mask, has_nulls, simd_mask_to_bitmask, write_global_bitmask_block,
 };
-use crate::{errors::KernelError, utils::is_simd_aligned};
 
 /// **Poisson Distribution Probability Mass Function** - *SIMD-Accelerated Discrete Event PMF*
-/// 
+///
 /// Computes the probability mass function of the Poisson distribution using vectorised SIMD operations
 /// where possible, with automatic scalar fallback for optimal performance in discrete counting processes
 /// and event modelling applications.
-/// 
+///
 /// ## Mathematical Definition
-/// 
+///
 /// The Poisson distribution PMF is defined as:
-/// 
+///
 /// ```text
 /// P(X=k|λ) = e^(-λ) × λ^k / k!
 /// ```
-/// 
+///
 /// Where:
 /// - `X = k` ∈ ℕ₀: observed event counts (input values, non-negative integers)
 /// - `λ` ≥ 0: event rate parameter (average number of events per interval)
 /// - `k!`: factorial of k
-/// 
+///
 /// ## Parameters
-/// 
+///
 /// * `k` - Input data slice of `u64` event counts where PMF is evaluated
 /// * `lambda` - Event rate parameter (λ), must be non-negative and finite
 /// * `null_mask` - Optional input null bitmap for handling missing values
 /// * `null_count` - Optional count of null values, enables optimised processing paths
-/// 
+///
 /// ## Returns
-/// 
+///
 /// Returns `Result<FloatArray<f64>, KernelError>` containing:
 /// * **Success**: `FloatArray` with PMF values and appropriate null mask
 /// * **Error**: `KernelError::InvalidArguments` for invalid parameters
@@ -73,7 +74,7 @@ pub fn poisson_pmf_simd(
 
     const N: usize = W64;
 
-    // Degenerate λ == 0 → PMF(k) = 1_{k==0}
+    // Degenerate λ == 0 -> PMF(k) = 1_{k==0}
     if lambda == 0.0 {
         let mut out = Vec64::with_capacity(k.len());
         if !has_nulls(null_count, null_mask) {

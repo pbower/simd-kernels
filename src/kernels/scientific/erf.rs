@@ -30,7 +30,7 @@
 //!
 //! ### Inverse Complementary Error Function
 //! ```text
-//! erfc⁻¹(p) : ℝ → ℝ such that erfc(erfc⁻¹(p)) = p
+//! erfc⁻¹(p) : ℝ -> ℝ such that erfc(erfc⁻¹(p)) = p
 //! ```
 //!
 //! ## Usage Examples
@@ -683,7 +683,7 @@ pub fn erfc_inv(p: f64) -> f64 {
         return 0.0;
     } // centre
 
-    // ----- symmetry reduction  (0,1]  via p → pp = min(p,2−p) ------------
+    // ----- symmetry reduction  (0,1]  via p -> pp = min(p,2−p) ------------
     let (pp, sign) = if p < 1.0 { (p, 1.0) } else { (2.0 - p, -1.0) };
 
     // ----- Winitzki log-sqrt seed  ---------------------------------------

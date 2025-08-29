@@ -17,16 +17,17 @@ include!(concat!(env!("OUT_DIR"), "/simd_lanes.rs"));
 
 use std::simd::{Simd, StdFloat, cmp::SimdPartialOrd, num::SimdFloat};
 
+use minarrow::utils::is_simd_aligned;
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::univariate::common::simd::{
     dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
 };
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
 };
-use crate::utils::{has_nulls, is_simd_aligned};
+use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 const N: usize = W64;
 
@@ -47,7 +48,7 @@ const N: usize = W64;
 /// `Result<FloatArray<f64>, KernelError>` containing:
 /// - **Success**: FloatArray with computed PDF values and appropriate null mask
 /// - **Error**: KernelError::InvalidArguments for invalid location or scale parameters
-/// 
+///
 /// ## Special Cases and Boundary Conditions
 /// - **All finite x**: Standard PDF computation using absolute value and exponential
 /// - **x = μ**: Maximum density value of 1/(2b) at the location parameter
@@ -299,8 +300,8 @@ pub fn laplace_cdf_simd(
 ///
 /// ## Special Cases and Boundary Conditions
 /// - **p = 0.5**: Quantile equals μ (median point)
-/// - **p → 0+**: Quantile approaches -∞
-/// - **p → 1-**: Quantile approaches +∞
+/// - **p -> 0+**: Quantile approaches -∞
+/// - **p -> 1-**: Quantile approaches +∞
 /// - **p = 0**: Returns -∞
 /// - **p = 1**: Returns +∞
 /// - **Invalid p**: Returns NaN for p ∉ [0, 1] or non-finite p

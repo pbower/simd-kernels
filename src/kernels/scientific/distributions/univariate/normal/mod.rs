@@ -3,8 +3,8 @@
 
 //! # **Normal Distribution Module** - *Gaussian Distribution, Central Limit Foundation*
 //!
-//! High-performance implementation of the normal (Gaussian) distribution, the cornerstone of modern 
-//! statistics and the foundation of the Central Limit Theorem. This implementation provides 
+//! High-performance implementation of the normal (Gaussian) distribution, the cornerstone of modern
+//! statistics and the foundation of the Central Limit Theorem. This implementation provides
 //! industry-standard accuracy with optimal computational performance.
 //!
 //! ## Usage Examples
@@ -19,7 +19,7 @@
 //!
 //! // Critical values for hypothesis testing
 //! let alpha = vec64![0.001, 0.01, 0.05];  // significance levels
-//! let z_critical = normal_quantile(&alpha.iter().map(|&a| 1.0 - a/2.0).collect::<Vec<_>>(), 
+//! let z_critical = normal_quantile(&alpha.iter().map(|&a| 1.0 - a/2.0).collect::<Vec<_>>(),
 //!                                  0.0, 1.0, None, None).unwrap();
 //!
 //! // Custom normal distribution (μ=100, σ=15)
@@ -33,7 +33,7 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Normal PDF - vectorised, SIMD where available, with Arrow-compatible null handling.
 /// Propagates input nulls and sets output null for any non-finite result.
@@ -194,13 +194,13 @@ mod tests {
 
     #[test]
     fn normal_quantile_zero_std() {
-        // std ≤ 0  → NaN  (SciPy raises but returns nan value)
+        // std ≤ 0  -> NaN  (SciPy raises but returns nan value)
         assert!(normal_quantile_scalar(0.5, 0.0, 0.0).is_nan());
     }
 
     #[test]
     fn normal_quantile_negative_std() {
-        // std ≤ 0  → NaN  (SciPy raises but returns nan value)
+        // std ≤ 0  -> NaN  (SciPy raises but returns nan value)
         assert!(normal_quantile_scalar(0.5, 0.0, -1.0).is_nan());
     }
 
@@ -342,11 +342,11 @@ mod tests {
         }
         let arr = normal_pdf(&x, 0.0, 1.0, Some(&mask), Some(1)).unwrap();
         println!("{}", arr);
-        // Index 1 was null in input → output null + NaN
+        // Index 1 was null in input -> output null + NaN
         assert!(!arr.null_mask.as_ref().unwrap().get(1));
         assert!(arr.data[1].is_nan());
 
-        // Index 0 and 2 were valid → remain valid regardless of NaN
+        // Index 0 and 2 were valid -> remain valid regardless of NaN
         assert!(arr.null_mask.as_ref().unwrap().get(0));
         assert!(arr.null_mask.as_ref().unwrap().get(2));
 
@@ -509,7 +509,7 @@ mod tests {
         // Expected:
         // 0: NaN output, mask valid
         // 1: NaN output, mask valid
-        // 2: masked null → NaN output, mask invalid
+        // 2: masked null -> NaN output, mask invalid
         // 3: finite output, mask valid
         // 4: infinite output, mask valid
         // 5: NaN output, mask valid

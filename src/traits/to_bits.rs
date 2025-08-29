@@ -43,7 +43,7 @@ pub trait ToBits {
 /// all floating-point special values including NaN bit patterns and signed zeros.
 impl ToBits for f32 {
     type Bits = u32;
-    
+
     #[inline(always)]
     fn to_bits(self) -> u32 {
         f32::to_bits(self)
@@ -56,7 +56,7 @@ impl ToBits for f32 {
 /// all floating-point special values including NaN bit patterns and signed zeros.
 impl ToBits for f64 {
     type Bits = u64;
-    
+
     #[inline(always)]
     fn to_bits(self) -> u64 {
         f64::to_bits(self)

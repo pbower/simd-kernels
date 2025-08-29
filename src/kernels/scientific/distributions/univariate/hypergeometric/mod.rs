@@ -38,12 +38,12 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 /// Compute the probability mass function (PMF) for the hypergeometric distribution.
 ///
-/// The hypergeometric distribution models the number of successes in a fixed number of draws 
-/// from a finite population without replacement. This is the discrete analogue of sampling 
-/// without replacement, contrasting with the binomial distribution which assumes sampling 
+/// The hypergeometric distribution models the number of successes in a fixed number of draws
+/// from a finite population without replacement. This is the discrete analogue of sampling
+/// without replacement, contrasting with the binomial distribution which assumes sampling
 /// with replacement or infinite population size.
 ///
 /// ## Mathematical Definition
@@ -274,8 +274,8 @@ mod tests {
     fn hypergeom_quantile_reference_values() {
         // p grid spanning [0,1]
         let p = [
-            0.0,  // → -1
-            5e-5, // between 0 and first PMF → 0
+            0.0,  // -> -1
+            5e-5, // between 0 and first PMF -> 0
             0.05, 0.3, 0.7, 0.95, 1.0, // assorted interior / tail
         ];
         let expect = vec64![-1.0, 0.0, 2.0, 4.0, 5.0, 6.0, 7.0];
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn hypergeom_quantile_roundtrip() {
-        // CDF → Quantile should be non-decreasing and “round-trip” for these ks
+        // CDF -> Quantile should be non-decreasing and “round-trip” for these ks
         let k: Vec<u64> = (0..=MIN_K as u64).collect();
         let cdf = dense_data(hypergeometric_cdf(&k, N_POP, N_SUC, N_DRAW, None, None).unwrap());
         let q =

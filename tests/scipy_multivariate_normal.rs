@@ -8,11 +8,9 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 #[cfg(feature = "linear_algebra")]
 mod scipy_multivariate_normal_tests {
-    use simd_kernels::kernels::scientific::distributions::multivariate::{
-        mvn_logpdf, mvn_pdf,
-    };
-    use minarrow::{Vec64, vec64};
     use super::util::assert_slice_close;
+    use minarrow::{Vec64, vec64};
+    use simd_kernels::kernels::scientific::distributions::multivariate::{mvn_logpdf, mvn_pdf};
 
     #[inline]
     fn flatten_points(xs: &[Vec64<f64>]) -> Vec<f64> {

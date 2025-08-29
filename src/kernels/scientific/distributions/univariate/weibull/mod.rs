@@ -3,8 +3,8 @@
 
 //! # **Weibull Distribution Module** - *SIMD Accelerated Survival Analysis*
 //!
-//! High-performance implementation of the Weibull distribution, fundamental to reliability 
-//! engineering, survival analysis, and extreme value theory. This distribution also has 
+//! High-performance implementation of the Weibull distribution, fundamental to reliability
+//! engineering, survival analysis, and extreme value theory. This distribution also has
 //! broad applications in engineering and life sciences.
 //!
 //! ## Overview
@@ -30,7 +30,7 @@
 //! - **k = 1**: Constant hazard rate
 //! - **k > 1**: Increasing hazard rate
 //! - **k = 2**: Rayleigh distribution
-//! - **k → ∞**: Approaches normal distribution
+//! - **k -> ∞**: Approaches normal distribution
 //!
 //! ## Usage Examples
 //! ```rust,ignore
@@ -62,13 +62,13 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Compute the probability density function (PDF) for the Weibull distribution.
 ///
-/// The Weibull distribution is a continuous probability distribution widely used in reliability 
-/// engineering, survival analysis, and extreme value theory. It is particularly valuable for 
-/// modelling time-to-failure data and characterising the life distribution of materials, 
+/// The Weibull distribution is a continuous probability distribution widely used in reliability
+/// engineering, survival analysis, and extreme value theory. It is particularly valuable for
+/// modelling time-to-failure data and characterising the life distribution of materials,
 /// components, and systems.
 ///
 /// ## Mathematical Definition
@@ -188,7 +188,7 @@ mod tests {
     use minarrow::{Bitmask, vec64};
 
     // see "./tests" for scipy test suite
-    
+
     // Helpers
 
     fn mask_vec(bm: &Bitmask) -> Vec<bool> {
@@ -309,7 +309,7 @@ mod tests {
         assert_close(q[1], 0.0, 0.0); // ==0
         assert!(q[2].is_infinite()); // ==1
         assert!(q[3].is_nan()); // >1
-        assert!(q[4].is_nan()); // NaN in → NaN out
+        assert!(q[4].is_nan()); // NaN in -> NaN out
     }
 
     // Mask propagation tests

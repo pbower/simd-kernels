@@ -12,17 +12,15 @@
 //! CPU vector instructions. The implementations automatically fall back to scalar
 //! versions when data alignment requirements are not met.
 
+use minarrow::enums::error::KernelError;
 use minarrow::{Bitmask, FloatArray};
 use std::simd::{Simd, StdFloat, cmp::SimdPartialOrd, num::SimdFloat};
 
-use crate::kernels::scientific::distributions::shared::scalar::{*, ln_gamma_simd};
-use crate::utils::has_nulls;
-use crate::{
-    errors::KernelError,
-    kernels::scientific::distributions::univariate::common::simd::{
-        dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
-    },
+use crate::kernels::scientific::distributions::shared::scalar::{ln_gamma_simd, *};
+use crate::kernels::scientific::distributions::univariate::common::simd::{
+    dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
 };
+use crate::utils::has_nulls;
 
 /// SIMD-accelerated implementation of binomial distribution probability mass function.
 ///
@@ -166,7 +164,7 @@ pub fn binomial_cdf_simd(
             for i in 0..N {
                 let ki = k_arr[i] as u64;
                 out_arr[i] = if ki >= n {
-                    1.0 
+                    1.0
                 } else {
                     1.0 - incomplete_beta((ki + 1) as f64, n_f - ki as f64, p)
                 };

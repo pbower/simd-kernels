@@ -14,10 +14,10 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_weibull_tests {
     use super::util::assert_slice_close;
+    use minarrow::vec64;
     use simd_kernels::kernels::scientific::distributions::univariate::weibull::{
         weibull_cdf, weibull_pdf, weibull_quantile,
     };
-    use minarrow::vec64;
 
     // ---- PDF ----
 
@@ -91,7 +91,7 @@ mod scipy_weibull_tests {
         assert_slice_close(&got, &expect, 1e-15);
     }
 
-    // identities: Weibull(c=1) ↔ Exponential, Weibull(c=2) ↔ Rayleigh
+    // identities: Weibull(c=1) <-> Exponential, Weibull(c=2) <-> Rayleigh
 
     #[test]
     fn weibull_pdf_weibull_expon_identity_weibull() {

@@ -38,7 +38,7 @@ pub fn ln_gamma(x: f64) -> f64 {
         return f64::INFINITY;
     }
 
-    // Poles: Γ(x) has simple poles at 0, −1, −2, …  ⇒  ln|Γ| → +∞
+    // Poles: Γ(x) has simple poles at 0, −1, −2, …  ⇒  ln|Γ| -> +∞
     if x <= 0.0 && (x.fract().abs() < 1e-14) {
         return f64::INFINITY;
     }
@@ -232,11 +232,11 @@ pub fn inv_reg_upper_gamma(a: f64, q: f64) -> f64 {
 /// Regularised lower incomplete gamma P(a, x)
 ///
 /// Edge cases:
-/// * `x < 0`              → NaN
-/// * `a  < 0`             → NaN
-/// * `a == 0` & x ≥ 0     → 1.0
-/// * `x == 0` & a  > 0    → 0.0
-/// * any NaN argument     → NaN
+/// * `x < 0`              -> NaN
+/// * `a  < 0`             -> NaN
+/// * `a == 0` & x ≥ 0     -> 1.0
+/// * `x == 0` & a  > 0    -> 0.0
+/// * any NaN argument     -> NaN
 #[inline(always)]
 pub fn reg_lower_gamma(a: f64, x: f64) -> f64 {
     // Propagate NaNs first
@@ -317,13 +317,13 @@ pub fn gamma_pdf_scalar(a: f64, x: f64) -> f64 {
 //// Computes the Gamma function Γ(x).
 ///  
 /// Special cases:
-/// * `x = 0`           → `+∞`
-/// * `x ∈ ℤ⁻` (negative integer) → `NaN`
-/// * `x = n`   (1 ≤ n ≤ 170, integer) → exact `(n-1)!` via lookup
-/// * `x = n+½` (0 ≤ n ≤ 170)         → closed-form half-integer Gamma
+/// * `x = 0`           -> `+∞`
+/// * `x ∈ ℤ⁻` (negative integer) -> `NaN`
+/// * `x = n`   (1 ≤ n ≤ 170, integer) -> exact `(n-1)!` via lookup
+/// * `x = n+½` (0 ≤ n ≤ 170)         -> closed-form half-integer Gamma
 /// * otherwise  
-///   * if `x > 0`  → Lanczos via `exp(ln_gamma(x))`
-///   * if `x < 0`  → reflection  Γ(x)=π / [sin(πx) Γ(1−x)]
+///   * if `x > 0`  -> Lanczos via `exp(ln_gamma(x))`
+///   * if `x < 0`  -> reflection  Γ(x)=π / [sin(πx) Γ(1−x)]
 #[inline(always)]
 pub fn gamma_func(x: f64) -> f64 {
     // NaN propagates
@@ -331,12 +331,12 @@ pub fn gamma_func(x: f64) -> f64 {
         return f64::NAN;
     }
 
-    // 0 → +∞    (SciPy)
+    // 0 -> +∞    (SciPy)
     if x == 0.0 {
         return f64::INFINITY;
     }
 
-    // Negative integers (simple poles) → NaN   (SciPy)
+    // Negative integers (simple poles) -> NaN   (SciPy)
     if x < 0.0 && (x.fract().abs() < 1e-14) {
         return f64::NAN;
     }
@@ -384,7 +384,7 @@ pub fn gamma_func(x: f64) -> f64 {
 }
 
 /// Evaluates gamma function at half-integer arguments using closed-form expression.
-/// 
+///
 /// Computes Γ(n + 1/2) for non-negative integer n using the exact closed-form
 /// formula involving factorials and powers.
 #[inline(always)]
@@ -397,10 +397,10 @@ pub fn half_integer_gamma(n: u64) -> f64 {
 
 /// Regularised incomplete beta I_x(a, b).
 ///
-///   * `a == 0`  →  1.0  (mass entirely to the right of x)
-///   * `b == 0`  →  0.0  (mass entirely at the left of x)
+///   * `a == 0`  ->  1.0  (mass entirely to the right of x)
+///   * `b == 0`  ->  0.0  (mass entirely at the left of x)
 ///   * non-finite inputs propagate `NaN`
-///   * x ≤ 0 → 0 ··· x ≥ 1 → 1
+///   * x ≤ 0 -> 0 ··· x ≥ 1 -> 1
 #[inline(always)]
 pub fn incomplete_beta(a: f64, b: f64, x: f64) -> f64 {
     // Handle NaNs first
@@ -491,14 +491,14 @@ pub fn incomplete_beta(a: f64, b: f64, x: f64) -> f64 {
 /// Inverse regularised incomplete beta I_x(a, b)
 ///
 /// Special cases:
-///   * Any non-finite input → NaN
-///   * a == 0 → returns 1.0  (if p < 1)  or NaN if p out of [0,1]
-///   * b == 0 → returns 0.0  (if p > 0)  or NaN if p out of [0,1]
+///   * Any non-finite input -> NaN
+///   * a == 0 -> returns 1.0  (if p < 1)  or NaN if p out of [0,1]
+///   * b == 0 -> returns 0.0  (if p > 0)  or NaN if p out of [0,1]
 /// Inverse regularised incomplete beta I_x(a, b)
 ///
-/// * Any non-finite input → NaN
-/// * a == 0 → 1.0   (if 0 ≤ p ≤ 1)
-/// * b == 0 → 0.0   (if 0 ≤ p ≤ 1)
+/// * Any non-finite input -> NaN
+/// * a == 0 -> 1.0   (if 0 ≤ p ≤ 1)
+/// * b == 0 -> 0.0   (if 0 ≤ p ≤ 1)
 #[inline(always)]
 pub fn incomplete_beta_inv(a: f64, b: f64, p: f64) -> f64 {
     // Fast parameter & domain checks
@@ -684,7 +684,7 @@ pub fn regularised_gamma_p(s: f64, x: f64) -> f64 {
 }
 
 /// High-performance vectorised logarithmic binomial coefficient computation.
-/// 
+///
 /// Computes ln(C(n,k)) = ln(n! / (k!(n-k)!)) for vectors of n and k values
 /// using SIMD vectorisation and optimised gamma function evaluation.
 #[inline(always)]
@@ -698,7 +698,7 @@ pub fn ln_choose_v(
 }
 
 /// Computes logarithmic binomial coefficient for integer arguments with validation.
-/// 
+///
 /// Evaluates ln(C(n,k)) = ln(n! / (k!(n-k)!)) for non-negative integer arguments
 /// using gamma function evaluation.
 #[inline(always)]
@@ -710,7 +710,7 @@ pub fn ln_choose(n: u64, k: u64) -> f64 {
 }
 
 /// Generic SIMD logarithmic binomial coefficient with compile-time lane count.
-/// 
+///
 /// Computes ln(C(n,k)) for vectors of n and k values using SIMD vectorisation
 /// with arbitrary lane counts determined at compile time.
 #[inline(always)]
@@ -766,10 +766,10 @@ pub fn binomial_quantile_cornish_fisher(pi: f64, n: u64, p_: f64) -> f64 {
 
 /// Scalar binomial CDF
 ///
-/// * k < 0  → 0  
-/// * k ≥ n  → 1  
-/// * p ≤ 0  → 1 for k ≥ 0  
-/// * p ≥ 1  → 0 for k < n, 1 for k ≥ n
+/// * k < 0  -> 0  
+/// * k ≥ n  -> 1  
+/// * p ≤ 0  -> 1 for k ≥ 0  
+/// * p ≥ 1  -> 0 for k < n, 1 for k ≥ n
 ///
 /// Arguments:
 ///     k: i64 - Number of observed successes (can be negative).
@@ -811,7 +811,7 @@ pub fn binomial_cdf_scalar(k: i64, n: u64, p: f64) -> f64 {
 }
 
 /// Core inverse standard normal function for left tail probabilities.
-/// 
+///
 /// Computes Φ⁻¹(p) for probabilities p ∈ (0, 0.5] using Acklam's rational
 /// approximation optimised for the left tail region.
 #[inline(always)]
@@ -851,7 +851,7 @@ pub fn inv_std_normal_core(p: f64) -> f64 {
 /// # Domain and Range
 /// - **Domain**: p ∈ [0, 1]
 /// - **Range**: z ∈ (-∞, ∞)
-/// - **Special cases**: 
+/// - **Special cases**:
 ///   - `p = 0.0` returns `-∞`
 ///   - `p = 1.0` returns `+∞`
 ///   - `p = 0.5` returns `0.0`
@@ -875,7 +875,7 @@ pub fn inv_std_normal(p: f64) -> f64 {
 }
 
 /// Specialised Newton refinement for extreme chi-squared quantile computation.
-/// 
+///
 /// High-precision iterative refinement method specifically optimised for
 /// extreme chi-squared quantiles where standard methods may suffer from
 /// numerical instability. Uses extended iteration counts and tighter
@@ -940,7 +940,7 @@ pub fn chi2_newton_refine_extreme(mut x: f64, a: f64, p: f64) -> f64 {
 }
 
 /// Standard Newton refinement for chi-squared quantile computation.
-/// 
+///
 /// Efficient iterative refinement method for chi-squared distribution quantiles
 /// using safeguarded Newton's method with adaptive step damping. Provides
 /// optimal balance between computational efficiency and numerical accuracy
@@ -1002,7 +1002,7 @@ pub fn chi2_newton_refine(mut x: f64, a: f64, p: f64) -> f64 {
 }
 
 /// Evaluates standard normal cumulative distribution function with high accuracy.
-/// 
+///
 /// Computes the cumulative distribution function Φ(z) of the standard normal
 /// distribution N(0,1) at the specified point z using the complementary error
 /// function for optimal numerical precision. This implementation provides
@@ -1018,7 +1018,7 @@ pub fn normal_cdf_scalar(z: f64) -> f64 {
 }
 
 /// Evaluates standard normal probability density function at given point.
-/// 
+///
 /// Computes the probability density function φ(z) of the standard normal
 /// distribution N(0,1) at the specified point z. This function provides
 /// numerically stable evaluation across the entire real domain with

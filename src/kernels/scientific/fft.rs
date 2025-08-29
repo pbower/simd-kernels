@@ -18,7 +18,7 @@
 //! - **Telecommunications**: Modulation, demodulation, and channel analysis
 //! - **Machine Learning**: Feature extraction and data preprocessing
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 use minarrow::{FloatArray, Vec64};
 use num_complex::Complex64;
 
@@ -73,17 +73,20 @@ pub fn butterfly_radix8(buf: &mut [Complex64]) {
 // In-place radix-4 DIT for 4 points.
 #[inline(always)]
 fn fft4_in_place(x: &mut [Complex64; 4]) {
-    let x0 = x[0]; let x1 = x[1]; let x2 = x[2]; let x3 = x[3];
+    let x0 = x[0];
+    let x1 = x[1];
+    let x2 = x[2];
+    let x3 = x[3];
 
-    let a = x0 + x2;          // (0)+(2)
-    let b = x0 - x2;          // (0)-(2)
-    let c = x1 + x3;          // (1)+(3)
+    let a = x0 + x2; // (0)+(2)
+    let b = x0 - x2; // (0)-(2)
+    let c = x1 + x3; // (1)+(3)
     let d = (x1 - x3) * Complex64::new(0.0, -1.0); // (1)-(3) times -j
 
-    x[0] = a + c;             // k=0
-    x[2] = a - c;             // k=2
-    x[1] = b + d;             // k=1
-    x[3] = b - d;             // k=3
+    x[0] = a + c; // k=0
+    x[2] = a - c; // k=2
+    x[1] = b + d; // k=1
+    x[3] = b - d; // k=3
 }
 
 /// 8-point FFT
@@ -94,7 +97,7 @@ pub fn fft8_radix(
 ) -> Result<(FloatArray<f64>, FloatArray<f64>), KernelError> {
     // Split into evens and odds
     let mut even = [buf[0], buf[2], buf[4], buf[6]];
-    let mut odd  = [buf[1], buf[3], buf[5], buf[7]];
+    let mut odd = [buf[1], buf[3], buf[5], buf[7]];
 
     // 4-point FFTs
     fft4_in_place(&mut even);
@@ -106,14 +109,14 @@ pub fn fft8_radix(
     // W8^2 =  0   - j
     // W8^3 = -√2/2 - j√2/2
     let s = std::f64::consts::FRAC_1_SQRT_2;
-    let w1 = Complex64::new( s, -s);
-    let w2 = Complex64::new( 0.0, -1.0);
+    let w1 = Complex64::new(s, -s);
+    let w2 = Complex64::new(0.0, -1.0);
     let w3 = Complex64::new(-s, -s);
 
-    let t0 = odd[0];         // W8^0 * odd[0]
-    let t1 = w1 * odd[1];    // W8^1 * odd[1]
-    let t2 = w2 * odd[2];    // W8^2 * odd[2]
-    let t3 = w3 * odd[3];    // W8^3 * odd[3]
+    let t0 = odd[0]; // W8^0 * odd[0]
+    let t1 = w1 * odd[1]; // W8^1 * odd[1]
+    let t2 = w2 * odd[2]; // W8^2 * odd[2]
+    let t3 = w3 * odd[3]; // W8^3 * odd[3]
 
     buf[0] = even[0] + t0;
     buf[4] = even[0] - t0;
@@ -153,7 +156,9 @@ pub fn block_fft(
     let bits = n.trailing_zeros();
     for i in 0..n {
         let rev = i.reverse_bits() >> (usize::BITS - bits);
-        if i < rev { data.swap(i, rev); }
+        if i < rev {
+            data.swap(i, rev);
+        }
     }
 
     // iterative radix-2 DIT
@@ -168,7 +173,7 @@ pub fn block_fft(
             for j in 0..half {
                 let t = w * data[k + j + half];
                 let u = data[k + j];
-                data[k + j]        = u + t;
+                data[k + j] = u + t;
                 data[k + j + half] = u - t;
                 w *= w_m;
             }
@@ -185,13 +190,11 @@ pub fn block_fft(
     Ok((FloatArray::new(real, None), FloatArray::new(imag, None)))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use num_complex::Complex64;
     use rand::Rng;
-
 
     // ---- SciPy/NumPy FFT references ----
 
@@ -265,7 +268,9 @@ mod tests {
 
     #[test]
     fn block_fft_matches_scipy_seq0_7() {
-        let mut data = (0..8).map(|v| Complex64::new(v as f64, 0.0)).collect::<Vec<_>>();
+        let mut data = (0..8)
+            .map(|v| Complex64::new(v as f64, 0.0))
+            .collect::<Vec<_>>();
         let (_re, _im) = block_fft(&mut data).unwrap();
         let ref_out = scipy_fft_ref_8_seq_0_7();
         assert_vec_close(&data, &ref_out, 1e-12);
@@ -273,7 +278,9 @@ mod tests {
 
     #[test]
     fn block_fft_matches_scipy_seq0_15() {
-        let mut data = (0..16).map(|v| Complex64::new(v as f64, 0.0)).collect::<Vec<_>>();
+        let mut data = (0..16)
+            .map(|v| Complex64::new(v as f64, 0.0))
+            .collect::<Vec<_>>();
         let (_re, _im) = block_fft(&mut data).unwrap();
         let ref_out = scipy_fft_ref_16_seq_0_15();
         assert_vec_close(&data, &ref_out, 1e-11);

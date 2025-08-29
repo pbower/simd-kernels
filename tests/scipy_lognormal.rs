@@ -13,10 +13,10 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_lognormal_tests {
     use super::util::assert_slice_close;
+    use minarrow::vec64;
     use simd_kernels::kernels::scientific::distributions::univariate::lognormal::{
         lognormal_cdf, lognormal_pdf, lognormal_quantile,
     };
-    use minarrow::vec64;
     // TODO: Fix decimal points as source
 
     #[test]

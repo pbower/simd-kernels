@@ -3,8 +3,8 @@
 
 //! # **Student's t-Distribution Module** - *Heavy-Tailed Statistical Foundation*
 //!
-//! High-performance implementation of Student's t-distribution, essential for small-sample 
-//! statistical inference and robust statistical modelling. This implementation provides the 
+//! High-performance implementation of Student's t-distribution, essential for small-sample
+//! statistical inference and robust statistical modelling. This implementation provides the
 //! computational foundation for t-tests, confidence intervals, and regression analysis.
 //!
 //! ## Use cases
@@ -33,12 +33,12 @@
 //! let x = vec64![-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0];
 //! let t_pdf = student_t_pdf(&x, 3.0, None, None).unwrap();  // df=3
 //! ```
-//! 
+//!
 #[cfg(feature = "simd")]
 mod simd;
 mod std;
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 use minarrow::{Bitmask, FloatArray};
 
 /// Student‐t PDF
@@ -97,7 +97,7 @@ mod tests {
     use minarrow::{Bitmask, Vec64, vec64};
 
     // see "./tests" for scipy test suite
-    
+
     // Helpers
 
     fn mask_vec(mask: &Bitmask) -> Vec<bool> {

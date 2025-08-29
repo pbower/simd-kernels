@@ -3,8 +3,8 @@
 
 //! # **Negative Binomial Distribution Module** - *Pascal Distribution, Discrete Failures*
 //!
-//! High-performance implementation of the negative binomial distribution (also known as the Pascal 
-//! distribution), representing the number of failures before achieving `r` successes in a sequence 
+//! High-performance implementation of the negative binomial distribution (also known as the Pascal
+//! distribution), representing the number of failures before achieving `r` successes in a sequence
 //! of independent Bernoulli trials.
 //!
 //! ## Usage Examples
@@ -32,7 +32,7 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Negative Binomial PMF (Pascal distribution, number of failures before r-th success)
 /// PMF: P(X=k) = C(k+r-1, k) * p^r * (1-p)^k, for k=0,1,...

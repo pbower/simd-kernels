@@ -16,9 +16,9 @@ use std::simd::{
 
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 use crate::utils::bitmask_to_simd_mask;
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// SIMD-accelerated implementation of discrete uniform distribution probability mass function.
 ///
@@ -238,7 +238,7 @@ pub fn discrete_uniform_cdf_simd(
 /// Discrete uniform quantile (lower tail; upper-exclusive support).
 /// Support = {low, …, high−1}, N = high−low.
 /// Q(p) = low + clamp(ceil(p*N)−1, −1, N−1).
-/// p is clamped to [0,1]; NaN → NaN (valid).
+/// p is clamped to [0,1]; NaN -> NaN (valid).
 #[inline(always)]
 pub fn discrete_uniform_quantile_simd(
     p: &[f64],

@@ -3,18 +3,18 @@
 
 //! # **Poisson Distribution Scalar Implementations** - *Discrete Event Computation*
 //!
-//! Scalar (non-SIMD) implementations of Poisson distribution functions optimised for numerical 
+//! Scalar (non-SIMD) implementations of Poisson distribution functions optimised for numerical
 //! stability and computational efficiency.
 
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::scalar::*;
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_u64_std, masked_univariate_kernel_u64_std,
 };
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// Poisson PMF: P(K=k|λ) = e^{-λ} · λ^k / k!
 /// k: observed event counts (all ≥ 0)
@@ -37,7 +37,7 @@ pub fn poisson_pmf_std(
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    // Degenerate distribution: λ == 0 → PMF(k) = 1_{k==0}
+    // Degenerate distribution: λ == 0 -> PMF(k) = 1_{k==0}
     if lambda == 0.0 {
         let mut out = Vec64::with_capacity(k.len());
         if !has_nulls(null_count, null_mask) {

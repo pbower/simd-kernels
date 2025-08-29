@@ -6,10 +6,8 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 #[cfg(feature = "linear_algebra")]
 mod scipy_mvn_condition_tests {
-    use simd_kernels::kernels::scientific::distributions::multivariate::{
-        mvn_logpdf, mvn_pdf,
-    };
     use super::util::assert_close;
+    use simd_kernels::kernels::scientific::distributions::multivariate::{mvn_logpdf, mvn_pdf};
 
     #[inline]
     fn cov_rows_to_vec<'a, const D: usize>(rows: &'a [[f64; D]; D]) -> Vec<&'a [f64]> {

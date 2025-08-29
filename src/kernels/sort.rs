@@ -3,17 +3,14 @@
 
 //! # **Sorting Algorithms Kernels Module** - *Array Sorting and Ordering Operations*
 //!
-//! Sorting kernels for ordering operations across Arrow-compatible 
+//! Sorting kernels for ordering operations across Arrow-compatible
 //! data types with null-aware semantics and optimised comparison strategies. Essential foundation
 //! for analytical operations requiring ordered data access and ranking computations.
 //!
 use std::cmp::Ordering;
 
-use minarrow::{
-    Bitmask, BooleanArray, CategoricalArray, Integer, MaskedArray, Vec64,
-    traits::type_unions::Float,
-};
-use num_traits::{NumCast, Zero};
+use minarrow::{Bitmask, BooleanArray, CategoricalArray, Integer, MaskedArray, Vec64};
+use num_traits::{Float, NumCast, Zero};
 
 /// Total ordering for f32/f64 as per IEEE 754
 ///
@@ -76,20 +73,20 @@ pub fn sorted_float<T: Float>(data: &[T]) -> Vec64<T> {
 }
 
 /// Performs in-place unstable sorting of integer slices with optimal performance.
-/// 
+///
 /// High-performance sorting function optimised for integer types using unstable sort algorithms
-/// that prioritise speed over preserving the relative order of equal elements. 
-/// 
+/// that prioritise speed over preserving the relative order of equal elements.
+///
 /// # Type Parameters
 /// - `T`: Integer type implementing `Ord + Copy` (i8, i16, i32, i64, u8, u16, u32, u64, etc.)
-/// 
+///
 /// # Parameters
 /// - `slice`: Mutable slice to be sorted in-place
 ///
 /// # Usage Example
 /// ```rust,ignore
 /// use simd_kernels::kernels::sort::sort_int;
-/// 
+///
 /// let mut data = [64i32, 34, 25, 12, 22, 11, 90];
 /// sort_int(&mut data);
 /// // data is now [11, 12, 22, 25, 34, 64, 90]
@@ -100,24 +97,24 @@ pub fn sort_int<T: Ord + Copy>(slice: &mut [T]) {
 }
 
 /// Creates a new sorted copy of integer data in a Vec64 container.
-/// 
+///
 /// Clones input data into a Vec64 and sorts it using the optimised
 /// integer sorting algorithm. Returns a new sorted container while leaving the original data
 /// unchanged.
-/// 
+///
 /// # Type Parameters
 /// - `T`: Integer type implementing `Ord + Copy` (i8, i16, i32, i64, u8, u16, u32, u64, etc.)
-/// 
+///
 /// # Parameters
 /// - `data`: Source slice to be copied and sorted
-/// 
+///
 /// # Returns
 /// A new `Vec64<T>` containing the sorted elements from the input slice.
-/// 
+///
 /// # Usage Example
 /// ```rust,ignore
 /// use simd_kernels::kernels::sort::sorted_int;
-/// 
+///
 /// let data = [64i32, 34, 25, 12, 22, 11, 90];
 /// let sorted = sorted_int(&data);
 /// // sorted contains [11, 12, 22, 25, 34, 64, 90]
@@ -130,17 +127,17 @@ pub fn sorted_int<T: Ord + Copy>(data: &[T]) -> Vec64<T> {
 }
 
 /// Performs in-place unstable sorting of string slice references with lexicographic ordering.
-/// 
+///
 /// High-performance sorting function for string references using unstable sort algorithms.
 /// Efficient lexicographic ordering for string processing, text analysis, and data organisation tasks.
-/// 
+///
 /// # Parameters
 /// - `slice`: Mutable slice of string references to be sorted in-place
-/// 
+///
 /// # Usage Example
 /// ```rust,ignore
 /// use simd_kernels::kernels::sort::sort_str;
-/// 
+///
 /// let mut words = ["zebra", "apple", "banana", "cherry"];
 /// sort_str(&mut words);
 /// // words is now ["apple", "banana", "cherry", "zebra"]
@@ -151,36 +148,36 @@ pub fn sort_str(slice: &mut [&str]) {
 }
 
 /// Creates a new sorted collection of owned strings from string references.
-/// 
+///
 /// Copies string references into owned String objects within a Vec64
 /// container and sorts them lexicographically. Returns a new sorted collection while preserving
 /// the original string references for scenarios requiring owned string data.
-/// 
+///
 /// # Parameters
 /// - `data`: Source slice of string references to be copied and sorted
-/// 
+///
 /// # Returns
 /// A new `Vec64<String>` containing owned, sorted string copies from the input references.
-/// 
+///
 /// # Memory Allocation
 /// - String allocation: Each string reference copied into a new String object
 /// - Container allocation: Vec64 provides 64-byte aligned storage for optimal performance
 /// - Heap usage: Total memory proportional to sum of string lengths plus container overhead
-/// 
+///
 /// # Performance Characteristics
 /// - O(n) string allocation and copying (proportional to total string length)
 /// - O(n log n) sorting time complexity with string comparison overhead
 /// - Memory overhead: Requires additional heap space for all string content
-/// 
+///
 /// # String Ownership
 /// - Input references: Original string references remain unchanged
 /// - Output strings: New owned String objects independent of input lifetime
 /// - Memory management: Vec64<String> handles automatic cleanup of owned strings
-/// 
+///
 /// # Usage Example
 /// ```rust,ignore
 /// use simd_kernels::kernels::sort::sorted_str;
-/// 
+///
 /// let words = ["zebra", "apple", "banana", "cherry"];
 /// let sorted = sorted_str(&words);
 /// // sorted contains owned Strings: ["apple", "banana", "cherry", "zebra"]

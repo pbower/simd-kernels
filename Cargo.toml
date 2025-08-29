@@ -1,7 +1,7 @@
 [package]
 name = "simd-kernels"
 description = "Lightning Fast, Arrow-Compatible Compute Kernels"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 authors = ['Peter Bower']
 license-file = "LICENSE"
@@ -13,12 +13,9 @@ keywords = [
     "data",
 ]
 [dependencies]
-minarrow = { version = "0.1.7", default-features = false, optional = false, features = ["views"] }
+minarrow = { workspace = true, default-features = false, optional = false, features = ["views"] }
 num-traits = "0.2.19"
 ordered-float = { version = "5.0.0", optional = true }
-regex = { version = "1.11.1", optional = true }
-ryu = { version = "1.0.20", optional = true }
-memchr = { version = "2.7.5", optional = true }
 num-complex = { version = "0.4.6", optional = true }
 blas = { version = "0.23.0", optional = true }
 lapack = { version = "0.20.0", optional = true }
@@ -31,8 +28,7 @@ cc = { version = "1", optional = true }
 [features]
 large_string = ["minarrow/large_string"]
 datetime = ["minarrow/datetime"]
-regex = ["dep:regex"]
-simd = []
+simd = ["minarrow/simd"]
 # Replaces all hashmaps and hashsets used for count distinct operations
 # and categorical dictionary interning with the faster ahash.
 fast_hash = ["dep:ahash"]
@@ -54,11 +50,6 @@ fourier_transforms = ["dep:num-complex"]
 # Enables CDF and PDF probability distributions
 probability_distributions = []
 extended_numeric_types = ["minarrow/extended_numeric_types"]
-
-# Adds string arithmetic kernels for more niche use cases.
-# Includes (small) external dependencies, and supports
-# str concatenation with floats e.g., "Hello" + 1.0 = "Hello1", etc.
-str_arithmetic = ["ryu", "memchr"]
 
 default = [
     "large_string",

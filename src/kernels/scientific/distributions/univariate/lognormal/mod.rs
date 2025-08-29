@@ -25,14 +25,14 @@
 pub mod simd;
 mod std;
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 use minarrow::{Bitmask, FloatArray};
 
 /// Compute the probability density function (PDF) for the lognormal distribution.
 ///
-/// The lognormal distribution is a continuous probability distribution of a random variable 
-/// whose logarithm follows a normal distribution. It is characterised by its positive support 
-/// and right-skewed shape, making it ideal for modelling multiplicative processes, financial 
+/// The lognormal distribution is a continuous probability distribution of a random variable
+/// whose logarithm follows a normal distribution. It is characterised by its positive support
+/// and right-skewed shape, making it ideal for modelling multiplicative processes, financial
 /// data, and many natural phenomena.
 ///
 /// ## Mathematical Definition
@@ -72,7 +72,7 @@ use minarrow::{Bitmask, FloatArray};
 /// // Standard lognormal distribution (μ=0, σ=1)
 /// let x = vec64![0.1, 0.5, 1.0, 2.0, 5.0];
 /// let pdf = lognormal_pdf(&x, 0.0, 1.0, None, None).unwrap();
-/// ``` 
+/// ```
 ///
 /// ## Applications
 ///
@@ -318,7 +318,7 @@ mod tests {
     //  Mask propagation + NaN / ∞ behaviour
     #[test]
     fn mask_propagation_and_nan_output() {
-        let p = vec64![0.3, f64::NAN, 1.2, 0.8]; // 1.2 -> out-of-range → NaN
+        let p = vec64![0.3, f64::NAN, 1.2, 0.8]; // 1.2 -> out-of-range -> NaN
         let mut mask = Bitmask::new_set_all(4, true);
         unsafe { mask.set_unchecked(1, false) }; // second element masked
 
@@ -330,6 +330,6 @@ mod tests {
         // Other lanes valid irrespective of NaN value
         assert!(nulls[0] && nulls[2] && nulls[3]);
         assert!(arr.data[1].is_nan()); // propagated
-        assert!(arr.data[2].is_nan()); // p = 1.2 → NaN
+        assert!(arr.data[2].is_nan()); // p = 1.2 -> NaN
     }
 }

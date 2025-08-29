@@ -27,12 +27,12 @@
 
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::scalar::*;
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::distributions::univariate::common::std::dense_univariate_kernel_f64_std;
 use crate::kernels::scientific::distributions::univariate::common::std::masked_univariate_kernel_f64_std;
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// Scalar implementation of beta distribution probability density function.
 ///

@@ -14,10 +14,10 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_beta_tests {
     use super::util::assert_slice_close;
+    use minarrow::vec64;
     use simd_kernels::kernels::scientific::distributions::univariate::beta::{
         beta_cdf, beta_pdf, beta_quantile,
     };
-    use minarrow::vec64;
 
     #[test]
     fn beta_pdf_standard_symmetric() {

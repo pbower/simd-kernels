@@ -4,13 +4,13 @@
 //! # **BLAS/LAPACK Integration Module** - *High-Performance Linear Algebra Kernels*
 //!
 //! ****************************************************************************************
-//! ⚠️ Warning: This module has not been fully tested, and is not ready for production use. 
+//! ⚠️ Warning: This module has not been fully tested, and is not ready for production use.
 //! This warning applies to all multivariate kernels in *SIMD-kernels*, which are to be finalised
 //! in an upcoming release.
 //! ****************************************************************************************
-//! 
+//!
 //! This module provides low-level bindings and optimised kernels for linear algebra operations
-//! through integration with industry-standard BLAS and LAPACK libraries. It forms the 
+//! through integration with industry-standard BLAS and LAPACK libraries. It forms the
 //! computational backbone for numerical linear algebra in the simd-kernels crate.
 //!
 //! ## Overview
@@ -41,7 +41,7 @@
 //! ## External Dependencies
 //!
 //! This module requires linking against BLAS and LAPACK.
-//! 
+//!
 //! Supported implementations include:
 //! - OpenBLAS - recommended for general uses
 //! - Intel MKL - optimal for Intel processors  
@@ -152,7 +152,6 @@ pub fn trisolve_2x2(
     }
     Ok(())
 }
-
 
 /// Applies Householder reflector(s) to a matrix panel.
 #[inline(always)]
@@ -474,7 +473,6 @@ pub fn svd_qr_iter() {
     todo!()
 }
 
-
 /// Computes the full or economy-size SVD of `A` in one shot.
 #[inline(always)]
 pub fn svd_block(
@@ -619,7 +617,7 @@ pub fn cachecov_syrk(
 }
 
 /// LU decomposition with partial pivoting (PA = LU).
-/// 
+///
 /// Computes `PA = LU` factorisation *in-place*.
 #[inline(always)]
 pub fn lufactor(
@@ -761,7 +759,6 @@ pub fn spd_cholesky(n: i32, a: &mut [f64], lda: i32) -> Result<(), &'static str>
     }
 }
 
-
 /// Solves **Σ X = B** where **Σ = L Lᵀ** (factor must already exist).
 #[inline(always)]
 pub fn spd_solve(
@@ -789,7 +786,6 @@ pub fn spd_solve(
         Err("DPOTRS failed")
     }
 }
-
 
 /// Computes inverse of SPD matrix via Cholesky factorisation.
 #[inline(always)]
@@ -892,7 +888,7 @@ pub fn least_squares_qr(
     a: &mut [f64],
     lda: i32, // A (overwritten)
     b: &mut [f64],
-    ldb: i32, // B → on exit contains solution X (min-norm)
+    ldb: i32, // B -> on exit contains solution X (min-norm)
 ) -> Result<(), &'static str> {
     if a.len() < (lda * n) as usize {
         return Err("A buffer too small");
@@ -939,7 +935,6 @@ pub fn least_squares_qr(
         Err("DGELS failed")
     }
 }
-
 
 /// Full symmetric eigendecomposition: A = QΛQᵀ.
 #[inline(always)]

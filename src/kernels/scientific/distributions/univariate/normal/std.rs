@@ -3,11 +3,10 @@
 
 //! # **Normal Distribution Scalar Implementations** - *Foundation for Statistical Computing*
 //!
-//! Scalar (non-SIMD) implementations of normal distribution functions providing the computational 
+//! Scalar (non-SIMD) implementations of normal distribution functions providing the computational
 //! foundation for statistical analysis.
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::constants::*;
 use crate::kernels::scientific::distributions::shared::scalar::normal_quantile_scalar;
 #[cfg(not(feature = "simd"))]
@@ -17,6 +16,7 @@ use crate::kernels::scientific::distributions::univariate::common::std::{
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::erf::erf;
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// Normal PDF (vectorised, SIMD where available), null-aware and Arrow-compliant.
 /// Propagates input nulls and sets output null for any non-finite result.
@@ -197,7 +197,7 @@ pub fn normal_quantile_std(
     // Right tail via symmetry.
     #[inline(always)]
     fn inv_norm_right_tail_tiny(q: f64) -> f64 {
-        // q = 1 - p is tiny → Φ^{-1}(p) = -Φ^{-1}(q)
+        // q = 1 - p is tiny -> Φ^{-1}(p) = -Φ^{-1}(q)
         -inv_norm_left_tail_tiny(q)
     }
 

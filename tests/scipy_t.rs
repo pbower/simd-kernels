@@ -13,10 +13,10 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_t_tests {
     use super::util::assert_slice_close;
+    use minarrow::vec64;
     use simd_kernels::kernels::scientific::distributions::univariate::student_t::{
         student_t_cdf, student_t_pdf, student_t_quantile,
     };
-    use minarrow::vec64;
     // use simd_kernels::kernels::scientific::distributions::univariate::t::{student_t_pdf, student_t_cdf, student_t_quantile};
 
     #[test]

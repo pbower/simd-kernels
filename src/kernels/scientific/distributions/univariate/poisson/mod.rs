@@ -3,10 +3,10 @@
 
 //! # **Poisson Distribution Module** - *Discrete Events, Counting Processes*
 //!
-//! High-performance implementation of the Poisson distribution, modelling the number of independent 
-//! events occurring within a fixed time interval or spatial region. This implementation provides 
+//! High-performance implementation of the Poisson distribution, modelling the number of independent
+//! events occurring within a fixed time interval or spatial region. This implementation provides
 //! numerically stable computation with optimised performance for large-scale statistical applications.
-//! 
+//!
 //! Due to the nature of the distribution, only the pmf case is SIMD-accelerated.
 //!
 //! ## Overview
@@ -17,7 +17,7 @@
 //! - **Variance**: `Var[X] = λ`
 //!
 //! ## Use cases
-//! The Poisson distribution is fundamental in modelling discrete counting processes where events 
+//! The Poisson distribution is fundamental in modelling discrete counting processes where events
 //! occur independently at a constant average rate:
 //! - **Telecommunications**: packet arrivals in network queues
 //! - **Epidemiology**: disease outbreak modelling and infection counts
@@ -34,7 +34,7 @@
 //! - **Distributional properties**: moment validation and tail behaviour verification
 //! - **Cross-validation**: PMF/CDF consistency and quantile round-trip testing
 //! - **Parameter robustness**: extensive testing across wide λ ranges
-//! 
+//!
 //! See `./tests` for coverage, and confirm the results on your target platform if you
 //! have specific requirements. We make no guarantees.
 //!
@@ -61,7 +61,7 @@ include!(concat!(env!("OUT_DIR"), "/simd_lanes.rs"));
 mod simd;
 mod std;
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 use minarrow::{Bitmask, FloatArray};
 
 /// Poisson PMF: P(K=k|λ) = e^{-λ} · λ^k / k!
@@ -125,7 +125,7 @@ mod tests {
     };
 
     // see "./tests" for scipy test suite
-    
+
     use super::*;
     use minarrow::{Bitmask, Vec64, vec64};
 

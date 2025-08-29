@@ -8,7 +8,7 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Discrete uniform PMF.
 /// P(X=k) = 1/(high−low+1) for k ∈ [low, high], else 0
@@ -54,7 +54,7 @@ pub fn discrete_uniform_cdf(
 
 /// Discrete uniform quantile (lower tail).
 /// Returns the smallest integer k ∈ [low, high] such that F(k) ≥ p.
-/// For p ≤ 0 → low; for p ≥ 1 → high.
+/// For p ≤ 0 -> low; for p ≥ 1 -> high.
 /// Output is returned as f64 (integer-valued) to match FloatArray.
 #[inline(always)]
 pub fn discrete_uniform_quantile(
@@ -234,7 +234,7 @@ mod discrete_uniform_tests {
         // Support = {2,3,4,5,6} -> high=7, N=5
         let (low, high) = (2_i64, 7_i64);
         let p = vec![0.0, 0.2, 0.2000001, 0.4, 0.6, 0.8, 1.0];
-        // SciPy randint: Q(0) = low-1; (0,0.2]→2; (0.2,0.4]→3; (0.4,0.6]→4; (0.6,0.8]→5; (0.8,1]→6
+        // SciPy randint: Q(0) = low-1; (0,0.2]->2; (0.2,0.4]->3; (0.4,0.6]->4; (0.6,0.8]->5; (0.8,1]->6
         let out = dense_data(discrete_uniform_quantile(&p, low, high, None, None).unwrap());
         let expect = vec64![1.0, 2.0, 3.0, 3.0, 4.0, 5.0, 6.0];
         for (a, e) in out.iter().zip(expect.iter()) {

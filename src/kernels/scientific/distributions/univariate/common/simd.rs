@@ -9,9 +9,8 @@
 
 use std::simd::{LaneCount, Mask, Simd, SupportedLaneCount};
 
-use minarrow::{Bitmask, Vec64};
+use minarrow::{Bitmask, Vec64, utils::is_simd_aligned};
 
-use crate::utils::is_simd_aligned;
 use crate::{
     kernels::scientific::distributions::univariate::common::std::{
         process_scalar_masked_f64_std, process_scalar_masked_u64_std,
@@ -19,7 +18,7 @@ use crate::{
     utils::bitmask_to_simd_mask,
 };
 
-/// High-performance SIMD kernel for dense f64→f64 univariate distribution computations.
+/// High-performance SIMD kernel for dense f64->f64 univariate distribution computations.
 ///
 /// Processes arrays without null values using vectorised operations for maximum performance.
 /// This kernel provides the fastest execution path when input data is guaranteed to be complete.
@@ -27,8 +26,8 @@ use crate::{
 /// ## Parameters
 /// - `x`: Input array slice (requires 64-byte alignment for SIMD activation)
 /// - `has_mask`: Whether to return an all-true validity mask for consistency
-/// - `simd_body`: Vectorised computation function: `Simd<f64, N> → Simd<f64, N>`
-/// - `scalar_body`: Scalar computation function for tail elements: `f64 → f64`
+/// - `simd_body`: Vectorised computation function: `Simd<f64, N> -> Simd<f64, N>`
+/// - `scalar_body`: Scalar computation function for tail elements: `f64 -> f64`
 ///
 /// ## Returns
 /// `(Vec64<f64>, Option<Bitmask>)` containing computed results and optional validity mask.
@@ -80,10 +79,10 @@ where
     (out, out_mask)
 }
 
-/// High-performance SIMD kernel for null-aware f64→f64 univariate distribution computations.
+/// High-performance SIMD kernel for null-aware f64->f64 univariate distribution computations.
 ///
 /// Processes arrays with null values using vectorised operations combined with efficient
-/// bitmask-based null propagation. 
+/// bitmask-based null propagation.
 ///
 /// ## SIMD Processing Strategy  
 /// - **Alignment Check**: Verifies 64-byte memory alignment for optimal SIMD performance
@@ -95,8 +94,8 @@ where
 /// ## Parameters
 /// - `x`: Input array slice (requires 64-byte alignment for SIMD activation)
 /// - `mask`: Arrow bitmask defining valid/null elements (required)
-/// - `simd_body`: Vectorised computation function: `Simd<f64, N> → Simd<f64, N>`
-/// - `scalar_body`: Scalar computation function: `f64 → f64`
+/// - `simd_body`: Vectorised computation function: `Simd<f64, N> -> Simd<f64, N>`
+/// - `scalar_body`: Scalar computation function: `f64 -> f64`
 ///
 /// ## Returns
 /// `(Vec64<f64>, Bitmask)` containing computed results and propagated null mask.
@@ -157,27 +156,27 @@ where
     (out, out_mask)
 }
 
-/// High-performance SIMD kernel for dense u64→f64 univariate distribution computations.
+/// High-performance SIMD kernel for dense u64->f64 univariate distribution computations.
 ///
 /// It's for discrete distributions that process integer input values and produce
 /// floating-point probability results.
-/// 
-/// Library functions *(and you can)* use this when you know that your data is dense, to 
+///
+/// Library functions *(and you can)* use this when you know that your data is dense, to
 /// avoid null-mask related conditional checks in the hot loop. We still take a 'has_mask'
 /// for when this is used in a micro-batching context, and it will then ensure the output
 /// receives a mask back with all bits set to *true*.
 ///
 /// ## SIMD Processing Strategy
 /// - **Integer Loading**: Efficiently loads u64 values into SIMD registers
-/// - **Type Conversion**: Handles u64→f64 casting within vectorised operations where needed
+/// - **Type Conversion**: Handles u64->f64 casting within vectorised operations where needed
 /// - **Alignment Optimisation**: Leverages 64-byte alignment for optimal memory throughput
 /// - **Hybrid Processing**: SIMD for bulk operations, scalar for tail elements
 ///
 /// ## Parameters
 /// - `x`: Input u64 array slice (requires 64-byte alignment for SIMD activation)
 /// - `has_mask`: Whether to return an all-true validity mask for consistency
-/// - `simd_body`: Vectorised computation function: `Simd<u64, N> → Simd<f64, N>`
-/// - `scalar_body`: Scalar computation function: `u64 → f64`
+/// - `simd_body`: Vectorised computation function: `Simd<u64, N> -> Simd<f64, N>`
+/// - `scalar_body`: Scalar computation function: `u64 -> f64`
 ///
 /// ## Returns
 /// `(Vec64<f64>, Option<Bitmask>)` containing computed probability values and optional validity mask.
@@ -232,7 +231,7 @@ where
     (out, out_mask)
 }
 
-/// Null‐aware masked kernel helper for u64→f64 kernels.
+/// Null‐aware masked kernel helper for u64->f64 kernels.
 ///
 /// Propagates the input mask and leaves any “invalid” (null) lanes as NULL;
 /// lanes that are in the mask but produce a non‐finite result in the scalar
@@ -257,11 +256,11 @@ where
     if is_simd_aligned(x) {
         let mut i = 0;
         while i + N <= len {
-            // 1) turn Arrow bitmask → SIMD lane mask
+            // 1) turn Arrow bitmask -> SIMD lane mask
 
             let lane_mask: Mask<i64, N> = bitmask_to_simd_mask::<N, i64>(mask_bytes, i, len);
 
-            // 2) gather inputs (null → 0)
+            // 2) gather inputs (null -> 0)
             let mut k_arr = [0u64; N];
             for j in 0..N {
                 k_arr[j] = unsafe { *x.get_unchecked(i + j) };

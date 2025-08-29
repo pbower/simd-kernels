@@ -34,7 +34,7 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Computes the probability mass function (PMF) of the binomial distribution.
 ///
@@ -60,7 +60,7 @@ use crate::errors::KernelError;
 ///
 /// ## Errors
 /// Returns `KernelError::InvalidArguments` if p ∉ [0, 1] or p is non-finite.
-/// 
+///
 /// ## Example
 /// ```rust,ignore
 /// use simd_kernels::kernels::scientific::distributions::univariate::binomial::binomial_pmf;
@@ -269,7 +269,7 @@ mod binomial_tests {
 
     #[test]
     fn binomial_pmf_out_of_range_zero() {
-        // k > n  → 0
+        // k > n  -> 0
         let ks = vec64![N_REF + 1, N_REF + 5];
         let arr = dense_data(binomial_pmf(&ks, N_REF, P_REF, None, None).unwrap());
         assert!(arr.iter().all(|&v| v == 0.0));

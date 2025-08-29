@@ -8,14 +8,14 @@
 //!
 //! ## Overview
 //! This module provides the scalar (non-SIMD) reference implementations for binomial
-//! distribution calculations. These implementations serve as both fallback implementations 
+//! distribution calculations. These implementations serve as both fallback implementations
 //! when SIMD is unavailable.
 
+use minarrow::enums::error::KernelError;
 use minarrow::{Bitmask, FloatArray, vec64};
 
 use crate::kernels::scientific::distributions::shared::scalar::*;
 use crate::{
-    errors::KernelError,
     kernels::scientific::distributions::univariate::common::std::{
         dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
     },

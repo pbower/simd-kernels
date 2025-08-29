@@ -3,8 +3,8 @@
 
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// Discrete uniform PMF (SciPy randint semantics: support = {low, …, high-1}).
 /// P(X=k) = 1/(high−low) for k ∈ [low, high), else 0.
@@ -120,7 +120,7 @@ pub fn discrete_uniform_cdf_std(
 /// Discrete uniform quantile (lower tail) matching SciPy randint.ppf.
 /// Support = {low,…,high-1}, N = high−low.
 /// Q(p) = low + clamp(ceil(p*N)−1, −1, N−1).
-/// p is clamped to [0,1]; NaN → NaN (valid).
+/// p is clamped to [0,1]; NaN -> NaN (valid).
 #[inline(always)]
 pub fn discrete_uniform_quantile_std(
     p: &[f64],

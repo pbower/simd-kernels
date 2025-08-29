@@ -52,7 +52,7 @@ mod std;
 
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
+use minarrow::enums::error::KernelError;
 
 /// Computes the probability density function (PDF) of the beta distribution.
 ///
@@ -78,7 +78,7 @@ use crate::errors::KernelError;
 /// - Input nulls propagate to output nulls
 /// - SIMD-accelerated when `simd` feature enabled and data is 64-byte aligned
 /// - Falls back to optimised scalar implementation otherwise
-/// 
+///
 /// ## Errors
 /// Returns `KernelError::InvalidArguments` if α ≤ 0, β ≤ 0, or parameters are non-finite.
 ///
@@ -211,9 +211,9 @@ pub fn beta_quantile(
 mod beta_tests {
 
     // See `./tests` for the scipy test suite
-    
-    use crate::kernels::scientific::distributions::univariate::common::dense_data;
+
     use super::*;
+    use crate::kernels::scientific::distributions::univariate::common::dense_data;
     use minarrow::{Bitmask, vec64};
 
     // helpers
@@ -231,7 +231,7 @@ mod beta_tests {
 
     #[test]
     fn beta_pdf_exact_values() {
-        // α = 2, β = 5  →  f(x) = 30·x·(1−x)^4
+        // α = 2, β = 5  ->  f(x) = 30·x·(1−x)^4
         let x = vec64![0.1, 0.2, 0.5];
         let expect = vec64![1.9683000000000004, 2.4576, 0.9375]; // 30*x*(1-x)^4
         let arr = dense_data(beta_pdf(&x, 2.0, 5.0, None, None).unwrap());
@@ -279,7 +279,7 @@ mod beta_tests {
 
     #[test]
     fn beta_cdf_exact_values() {
-        // α = 2, β = 5  →  F(x)=1-(1+5x)(1-x)^5
+        // α = 2, β = 5  ->  F(x)=1-(1+5x)(1-x)^5
         fn exact(x: f64) -> f64 {
             1.0 - (1.0 + 5.0 * x) * (1.0 - x).powi(5)
         }
@@ -295,8 +295,8 @@ mod beta_tests {
     fn beta_cdf_edges() {
         let x = vec64![-1.0, 0.0, 1.0, 2.0];
         let arr = dense_data(beta_cdf(&x, 2.0, 2.0, None, None).unwrap());
-        assert_close(arr[1], 0.0, 1e-15); // x ≤ 0  → 0
-        assert_close(arr[2], 1.0, 1e-15); // x ≥ 1  → 1
+        assert_close(arr[1], 0.0, 1e-15); // x ≤ 0  -> 0
+        assert_close(arr[2], 1.0, 1e-15); // x ≥ 1  -> 1
         // out-of-domain negatives/positives are clamped, never NaN
         assert_close(arr[0], 0.0, 1e-15);
         assert_close(arr[3], 1.0, 1e-15);

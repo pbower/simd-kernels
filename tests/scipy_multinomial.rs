@@ -14,8 +14,8 @@ mod util;
 #[cfg(feature = "probability_distributions")]
 mod scipy_multinomial_tests {
     use super::util::assert_slice_close;
-    use simd_kernels::kernels::scientific::distributions::univariate::multinomial::multinomial_pmf;
     use minarrow::vec64;
+    use simd_kernels::kernels::scientific::distributions::univariate::multinomial::multinomial_pmf;
 
     #[test]
     fn multinomial_pmf_fair_3cat() {
@@ -219,7 +219,7 @@ mod scipy_multinomial_tests {
     }
 
     #[test]
-    fn multinomial_pmf_market_segments() {
+    fn multinomial_pmf_market_stack() {
         let xs = vec64![8u64, 6, 4, 2, 5, 5, 5, 5, 17, 1, 1, 1];
         let probs = vec64![
             0.40000000000000002,

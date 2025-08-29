@@ -29,9 +29,9 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 
 use minarrow::traits::type_unions::Float;
+use minarrow::utils::confirm_equal_len;
 use minarrow::{Bitmask, BooleanAVT, BooleanArray, CategoricalAVT, Integer, Numeric, StringAVT};
 
-use crate::errors::KernelError;
 #[cfg(not(feature = "simd"))]
 use crate::kernels::bitmask::std::{and_masks, not_mask};
 #[cfg(not(feature = "simd"))]
@@ -43,7 +43,7 @@ use crate::kernels::logical::{
     cmp_between, cmp_dict_between, cmp_dict_in, cmp_in, cmp_in_f, cmp_str_between, cmp_str_in,
 };
 use crate::operators::ComparisonOperator;
-use crate::utils::confirm_equal_len;
+use minarrow::enums::error::KernelError;
 
 /// Returns a new Bitmask for boolean buffers, all bits cleared (false).
 #[inline(always)]
@@ -56,7 +56,6 @@ fn new_bool_bitmask(len_bits: usize) -> Bitmask {
 fn full_bool_bitmask(len_bits: usize) -> Bitmask {
     Bitmask::new_set_all(len_bits, true)
 }
-
 
 /// Merge two optional Bitmasks into a new output mask, computing per-row AND.
 /// Returns None if both inputs are None (output is dense).
@@ -299,7 +298,7 @@ pub fn apply_cmp_bool(
             (None, None) => None,
             (Some(m), None) | (None, Some(m)) => Some(m.slice_clone(lhs_off, len)),
             (Some(a), Some(b)) => {
-                use crate::kernels::bitmask::simd::and_masks_simd;
+                use minarrow::kernels::bitmask::simd::and_masks_simd;
                 let am = (a, lhs_off, len);
                 let bm = (b, rhs_off, len);
                 Some(and_masks_simd::<W8>(am, bm))
@@ -337,7 +336,7 @@ pub fn apply_cmp_bool(
         )?,
         ComparisonOperator::IsNull => {
             let data = match merged_null_mask.as_ref() {
-                Some(mask) => crate::kernels::bitmask::simd::not_mask_simd::<W8>((mask, 0, len)),
+                Some(mask) => minarrow::kernels::bitmask::simd::not_mask_simd::<W8>((mask, 0, len)),
                 None => Bitmask::new_set_all(len, false),
             };
             return Ok(BooleanArray {

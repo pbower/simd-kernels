@@ -9,9 +9,9 @@ include!(concat!(env!("OUT_DIR"), "/simd_lanes.rs"));
 
 use std::simd::{Simd, StdFloat};
 
+use minarrow::utils::is_simd_aligned;
 use minarrow::{Bitmask, FloatArray};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::scalar::*;
 use crate::kernels::scientific::distributions::univariate::common::simd::{
     dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
@@ -19,22 +19,23 @@ use crate::kernels::scientific::distributions::univariate::common::simd::{
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
 };
-use crate::utils::{has_nulls, is_simd_aligned};
+use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// **Student's t-Distribution Probability Density Function** - *SIMD-Accelerated Heavy-Tailed PDF*
-/// 
+///
 /// Computes the probability density function of Student's t-distribution using vectorised SIMD operations
 /// where possible, with automatic scalar fallback for compatibility across all architectures.
-/// 
+///
 /// ## Parameters
-/// 
+///
 /// * `x` - Input data slice of `f64` values where PDF is evaluated
 /// * `df` - Degrees of freedom (ν), must be positive and finite
 /// * `null_mask` - Optional input null bitmap for handling missing values
 /// * `null_count` - Optional count of null values, enables optimised processing paths
-/// 
+///
 /// ## Returns
-/// 
+///
 /// Returns `Result<FloatArray<f64>, KernelError>` containing:
 /// * **Success**: `FloatArray` with PDF values and appropriate null mask
 /// * **Error**: `KernelError::InvalidArguments` for invalid parameters

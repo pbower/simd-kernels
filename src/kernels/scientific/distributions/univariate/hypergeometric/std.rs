@@ -3,13 +3,13 @@
 
 use minarrow::{Bitmask, FloatArray, Vec64};
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::scalar::*;
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_u64_std, masked_univariate_kernel_u64_std,
 };
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// Hypergeometric PMF: P(X = k)
 #[cfg(not(feature = "simd"))]
@@ -36,7 +36,7 @@ pub fn hypergeometric_pmf_std(
     let ln_denom = ln_choose(population, draws);
     let min_k = success.min(draws);
 
-    // scalar body (u64 → f64)
+    // scalar body (u64 -> f64)
     let scalar_body = |ki: u64| -> f64 {
         if ki <= min_k && draws >= ki && draws - ki <= population - success {
             (ln_choose(success, ki) + ln_choose(population - success, draws - ki) - ln_denom).exp()

@@ -9,13 +9,13 @@
 use minarrow::{Bitmask, FloatArray, Vec64};
 use std::f64::consts::PI;
 
-use crate::errors::KernelError;
 use crate::kernels::scientific::distributions::shared::constants::*;
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::distributions::univariate::common::std::{
     dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
 };
 use crate::utils::has_nulls;
+use minarrow::enums::error::KernelError;
 
 /// Cauchy PDF (vectorised, SIMD where available), null-aware and Arrow-compliant.
 /// f(x; location, scale) = (1/π)·[scale / ((x − location)² + scale²)]
@@ -85,7 +85,7 @@ pub fn cauchy_cdf_std(
         ));
     }
     let len = x.len();
-    // Empty input → output
+    // Empty input -> output
     if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
@@ -159,7 +159,7 @@ pub fn cauchy_quantile_std(
                 // Robust tails
                 let t = pi.min(1.0 - pi);
                 if t <= 1e-8 {
-                    // asymptotic: tan(π(p-1/2)) = -cot(πp) ~ -1/(πp) for p→0
+                    // asymptotic: tan(π(p-1/2)) = -cot(πp) ~ -1/(πp) for p->0
                     let s = if pi < 0.5 { -1.0 } else { 1.0 };
                     let tail = s / (std::f64::consts::PI * t);
                     out.push(location + scale * tail);
@@ -186,7 +186,7 @@ pub fn cauchy_quantile_std(
         } else {
             let pi = p[idx];
 
-            // honour -inf/inf at the endpoints; outside (0,1) → NaN
+            // honour -inf/inf at the endpoints; outside (0,1) -> NaN
             if pi == 0.0 {
                 out.push(f64::NEG_INFINITY);
             } else if pi == 1.0 {
@@ -195,7 +195,7 @@ pub fn cauchy_quantile_std(
                 // robust tails
                 let t = pi.min(1.0 - pi);
                 if t <= 1e-8 {
-                    // tan(π(p−½)) = −cot(πp) ≈ −1/(πp) for p→0
+                    // tan(π(p−½)) = −cot(πp) ≈ −1/(πp) for p->0
                     let s = if pi < 0.5 { -1.0 } else { 1.0 };
                     let tail = s / (PI * t);
                     out.push(location + scale * tail);

@@ -4,11 +4,11 @@
 //! # **Multivariate Distributions Module** - *Multivariate Statistical Computing*
 //!
 //! ****************************************************************************************
-//! ⚠️ Warning: This module has not been fully tested, and is not ready for production use. 
+//! ⚠️ Warning: This module has not been fully tested, and is not ready for production use.
 //! This warning applies to all multivariate kernels in *SIMD-kernels*, which are to be finalised
 //! in an upcoming release.
 //! ****************************************************************************************
-//! 
+//!
 //! Multivariate probability distribution kernels providing high-performance
 //! evaluation of probability density functions, cumulative distributions, and random sampling
 //! for complex multivariate statistical models with full BLAS/LAPACK integration.
@@ -27,13 +27,11 @@ use lapack::{dpotrf, dpotrs};
 use minarrow::{Bitmask, FloatArray, Vec64};
 use rand::{Rng, rng};
 
-use crate::{
-    errors::KernelError,
-    kernels::scientific::distributions::{
-        shared::sampler::{Sampler, sample_gamma},
-        shared::{constants::LN_PI, scalar::ln_gamma},
-    },
+use crate::kernels::scientific::distributions::{
+    shared::sampler::{Sampler, sample_gamma},
+    shared::{constants::LN_PI, scalar::ln_gamma},
 };
+use minarrow::enums::error::KernelError;
 
 /// Standard multivariate probability distributions: PDF, log-PDF, and sampling.
 /// Covers all distributions needed for statistical analysis and Bayesian modelling.
@@ -76,9 +74,9 @@ fn ln_multivariate_gamma(d: usize, a: f64) -> f64 {
 
 /// Compute the multivariate normal log-probability density function (log-PDF).
 ///
-/// Evaluates the logarithm of the multivariate normal probability density function for 
-/// observations given mean vector and covariance matrix. This function provides numerically 
-/// stable computation by working directly in log-space, avoiding overflow issues common 
+/// Evaluates the logarithm of the multivariate normal probability density function for
+/// observations given mean vector and covariance matrix. This function provides numerically
+/// stable computation by working directly in log-space, avoiding overflow issues common
 /// with high-dimensional distributions.
 ///
 /// ## Mathematical Definition
@@ -185,7 +183,7 @@ pub fn mvn_logpdf(
         for i in 0..d {
             b[i] = x[base + i] - mean[i];
         }
-        // solve Σ · y = diff  →  y = Σ⁻¹ diff
+        // solve Σ · y = diff  ->  y = Σ⁻¹ diff
         let mut info = 0;
         unsafe { dpotrs(b'L', d as i32, 1, &a, d as i32, &mut b, d as i32, &mut info) };
         if info < 0 {
@@ -207,7 +205,7 @@ pub fn mvn_logpdf(
 
 /// Compute the multivariate normal probability density function (PDF).
 ///
-/// Evaluates the multivariate normal probability density function by exponentiating 
+/// Evaluates the multivariate normal probability density function by exponentiating
 /// the log-PDF result. For high-dimensional distributions or extreme parameter values,
 /// consider using `mvn_logpdf` directly to avoid numerical overflow.
 ///
@@ -252,8 +250,8 @@ pub fn mvn_pdf(
 
 /// Generate samples from a multivariate normal distribution.
 ///
-/// Draws independent samples from the multivariate normal distribution with 
-/// specified mean vector and covariance matrix using Cholesky decomposition 
+/// Draws independent samples from the multivariate normal distribution with
+/// specified mean vector and covariance matrix using Cholesky decomposition
 /// for transformation of independent standard normal random variables.
 ///
 /// ## Parameters
@@ -638,7 +636,7 @@ pub fn wishart_pdf(
 
     // normalization constant
     let half_df = df * 0.5;
-    let ln_norm = half_df * d as f64 * df.ln()  // 2^{νd/2} in denom → −(νd/2) ln2
+    let ln_norm = half_df * d as f64 * df.ln()  // 2^{νd/2} in denom -> −(νd/2) ln2
         + ln_multivariate_gamma(d, half_df)
         + half_df * log_det_sigma;
 
@@ -740,7 +738,7 @@ pub fn wishart_sample(
             // below diag
             for j in 0..i {
                 b[i * d + j] = samp.gamma(0.5, 1.0); // actually N(0,1)
-                // sampler.gamma isn't normal → use standard_normal_vec
+                // sampler.gamma isn't normal -> use standard_normal_vec
                 // but for speed, just:
                 b[i * d + j] = samp.standard_normal_vec(1)[0];
             }
@@ -868,7 +866,7 @@ pub fn inv_wishart_pdf(
         ln_det_x += 2.0 * xa[i + i * p].ln();
     }
 
-    // 7) invert X in place: solve X·Y = I → Y = X⁻¹
+    // 7) invert X in place: solve X·Y = I -> Y = X⁻¹
     let mut invx = Vec64::with_capacity(p * p);
     for j in 0..p {
         for i in 0..p {
@@ -968,7 +966,7 @@ pub fn inv_wishart_sample(
             "inv_wishart_sample: scale not SPD".into(),
         ));
     }
-    // solve Ψ · Y = I → Y = Ψ⁻¹
+    // solve Ψ · Y = I -> Y = Ψ⁻¹
     let mut psi_inv = Vec64::with_capacity(p * p);
     for j in 0..p {
         for i in 0..p {
@@ -1046,7 +1044,7 @@ pub fn inv_wishart_sample(
             }
         }
 
-        // 6) invert W → X = W⁻¹
+        // 6) invert W -> X = W⁻¹
         //   factor W = Lw·Lwᵀ
         unsafe {
             lapack::dpotrf(b'L', p as i32, &mut mat_w, p as i32, &mut info);
