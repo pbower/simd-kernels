@@ -300,18 +300,18 @@ macro_rules! impl_stat_moments_int {
 macro_rules! impl_reduce_min_max {
     ($name:ident, $ty:ty, $LANES:expr, $minval:expr, $maxval:expr) => {
         /// Finds the minimum and maximum values in a numeric slice.
-        /// 
+        ///
         /// Uses SIMD operations when available for optimal performance.
         /// Handles null values through optional bitmask.
-        /// 
+        ///
         /// # Arguments
-        /// 
+        ///
         /// * `data` - The slice of numeric values to process
         /// * `mask` - Optional bitmask indicating valid/invalid elements
         /// * `null_count` - Optional count of null values for optimisation
-        /// 
+        ///
         /// # Returns
-        /// 
+        ///
         /// `Some((min, max))` if any valid values exist, `None` if all values are null
         #[inline(always)]
         pub fn $name(
@@ -461,18 +461,18 @@ macro_rules! impl_reduce_min_max {
 macro_rules! impl_reduce_min_max_float {
     ($fn_name:ident, $ty:ty, $LANES:ident, $SIMD:ident, $MASK:ident) => {
         /// Finds the minimum and maximum values in a floating-point slice.
-        /// 
+        ///
         /// Handles NaN values correctly by treating them as missing data.
         /// Uses SIMD operations when available for optimal performance.
-        /// 
+        ///
         /// # Arguments
-        /// 
+        ///
         /// * `data` - The slice of floating-point values to process
         /// * `mask` - Optional bitmask indicating valid/invalid elements
         /// * `null_count` - Optional count of null values for optimisation
-        /// 
+        ///
         /// # Returns
-        /// 
+        ///
         /// `Some((min, max))` if any valid values exist, `None` if all values are null/NaN
         #[inline(always)]
         pub fn $fn_name(
@@ -1461,7 +1461,7 @@ macro_rules! impl_pair_stats_float {
             xs: &[$ty],
             ys: &[$ty],
             mask: Option<&Bitmask>,
-            null_count: Option<usize>
+            null_count: Option<usize>,
         ) -> PairStats {
             debug_assert_eq!(xs.len(), ys.len(), "pair_stats: len mismatch ");
             let has_nulls = has_nulls(null_count, mask);
@@ -1470,70 +1470,33 @@ macro_rules! impl_pair_stats_float {
             {
                 // Check if both arrays are 64-byte aligned for SIMD
                 if is_simd_aligned(xs) && is_simd_aligned(ys) {
+                    type V<const L: usize> = Simd<$ty, L>;
+                    type M<const L: usize> = <$ty as SimdElement>::Mask;
+                    const N: usize = $LANES;
+                    let len = xs.len();
 
-                type V<const L: usize> = Simd<$ty, L>;
-                type M<const L: usize> = <$ty as SimdElement>::Mask;
-                const N: usize = $LANES;
-                let len = xs.len();
+                    let mut i = 0usize;
+                    let mut sx = 0.0;
+                    let mut sy = 0.0;
+                    let mut sxy = 0.0;
+                    let mut sx2 = 0.0;
+                    let mut sy2 = 0.0;
+                    let mut n = 0usize;
 
-                let mut i = 0usize;
-                let mut sx = 0.0;
-                let mut sy = 0.0;
-                let mut sxy = 0.0;
-                let mut sx2 = 0.0;
-                let mut sy2 = 0.0;
-                let mut n = 0usize;
+                    if !has_nulls {
+                        while i + N <= len {
+                            let vx = V::<N>::from_slice(&xs[i..i + N]).cast::<f64>();
+                            let vy = V::<N>::from_slice(&ys[i..i + N]).cast::<f64>();
 
-                if !has_nulls {
-                    while i + N <= len {
-                        let vx = V::<N>::from_slice(&xs[i..i + N]).cast::<f64>();
-                        let vy = V::<N>::from_slice(&ys[i..i + N]).cast::<f64>();
-
-                        sx += vx.reduce_sum();
-                        sy += vy.reduce_sum();
-                        sxy += (vx * vy).reduce_sum();
-                        sx2 += (vx * vx).reduce_sum();
-                        sy2 += (vy * vy).reduce_sum();
-                        n += N;
-                        i += N;
-                    }
-                    for j in i..len {
-                        let xf = xs[j] as f64;
-                        let yf = ys[j] as f64;
-                        sx += xf;
-                        sy += yf;
-                        sxy += xf * yf;
-                        sx2 += xf * xf;
-                        sy2 += yf * yf;
-                        n += 1;
-                    }
-                } else {
-                    let mb = mask.expect("mask Some when nulls present");
-                    let mask_bytes = mb.as_bytes();
-
-                    while i + N <= len {
-                        let vx_raw = V::<N>::from_slice(&xs[i..i + N]);
-                        let vy_raw = V::<N>::from_slice(&ys[i..i + N]);
-                        let lane_m: Mask<M<N>, N> =
-                            bitmask_to_simd_mask::<N, M<N>>(mask_bytes, i, len);
-                        if !lane_m.any() {
+                            sx += vx.reduce_sum();
+                            sy += vy.reduce_sum();
+                            sxy += (vx * vy).reduce_sum();
+                            sx2 += (vx * vx).reduce_sum();
+                            sy2 += (vy * vy).reduce_sum();
+                            n += N;
                             i += N;
-                            continue;
                         }
-
-                        let vx = lane_m.select(vx_raw, V::<N>::splat(0.0)).cast::<f64>();
-                        let vy = lane_m.select(vy_raw, V::<N>::splat(0.0)).cast::<f64>();
-
-                        sx += vx.reduce_sum();
-                        sy += vy.reduce_sum();
-                        sxy += (vx * vy).reduce_sum();
-                        sx2 += (vx * vx).reduce_sum();
-                        sy2 += (vy * vy).reduce_sum();
-                        n += lane_m.to_bitmask().count_ones() as usize;
-                        i += N;
-                    }
-                    for j in i..len {
-                        if unsafe { mb.get_unchecked(j) } {
+                        for j in i..len {
                             let xf = xs[j] as f64;
                             let yf = ys[j] as f64;
                             sx += xf;
@@ -1543,9 +1506,52 @@ macro_rules! impl_pair_stats_float {
                             sy2 += yf * yf;
                             n += 1;
                         }
+                    } else {
+                        let mb = mask.expect("mask Some when nulls present");
+                        let mask_bytes = mb.as_bytes();
+
+                        while i + N <= len {
+                            let vx_raw = V::<N>::from_slice(&xs[i..i + N]);
+                            let vy_raw = V::<N>::from_slice(&ys[i..i + N]);
+                            let lane_m: Mask<M<N>, N> =
+                                bitmask_to_simd_mask::<N, M<N>>(mask_bytes, i, len);
+                            if !lane_m.any() {
+                                i += N;
+                                continue;
+                            }
+
+                            let vx = lane_m.select(vx_raw, V::<N>::splat(0.0)).cast::<f64>();
+                            let vy = lane_m.select(vy_raw, V::<N>::splat(0.0)).cast::<f64>();
+
+                            sx += vx.reduce_sum();
+                            sy += vy.reduce_sum();
+                            sxy += (vx * vy).reduce_sum();
+                            sx2 += (vx * vx).reduce_sum();
+                            sy2 += (vy * vy).reduce_sum();
+                            n += lane_m.to_bitmask().count_ones() as usize;
+                            i += N;
+                        }
+                        for j in i..len {
+                            if unsafe { mb.get_unchecked(j) } {
+                                let xf = xs[j] as f64;
+                                let yf = ys[j] as f64;
+                                sx += xf;
+                                sy += yf;
+                                sxy += xf * yf;
+                                sx2 += xf * xf;
+                                sy2 += yf * yf;
+                                n += 1;
+                            }
+                        }
                     }
-                }
-                return PairStats { n, sx, sy, sxy, sx2, sy2 };
+                    return PairStats {
+                        n,
+                        sx,
+                        sy,
+                        sxy,
+                        sx2,
+                        sy2,
+                    };
                 }
                 // Fall through to scalar path if alignment check failed
             }
@@ -1584,7 +1590,14 @@ macro_rules! impl_pair_stats_float {
                     }
                 }
             }
-            PairStats { n, sx, sy, sxy, sx2, sy2 }
+            PairStats {
+                n,
+                sx,
+                sy,
+                sxy,
+                sx2,
+                sy2,
+            }
         }
     };
 }
@@ -1624,20 +1637,20 @@ where
 macro_rules! impl_skew_kurt_float {
     ($ty:ident, $skew_fn:ident, $kurt_fn:ident) => {
         /// Calculates the skewness of a floating-point dataset.
-        /// 
+        ///
         /// Skewness measures the asymmetry of the probability distribution.
         /// Positive skewness indicates a longer tail on the right side,
         /// negative skewness indicates a longer tail on the left side.
-        /// 
+        ///
         /// # Arguments
-        /// 
+        ///
         /// * `d` - The slice of floating-point values
         /// * `m` - Optional bitmask for null value handling
         /// * `null_count` - Optional count of null values
         /// * `adjust_sample_bias` - Whether to apply sample bias correction
-        /// 
+        ///
         /// # Returns
-        /// 
+        ///
         /// `Some(skewness)` if calculation is possible, `None` if insufficient data
         #[inline(always)]
         pub fn $skew_fn(
@@ -1669,20 +1682,20 @@ macro_rules! impl_skew_kurt_float {
         }
 
         /// Calculates the kurtosis of a floating-point dataset.
-        /// 
+        ///
         /// Kurtosis measures the "tailedness" of the probability distribution.
         /// Higher kurtosis indicates more extreme outliers, lower kurtosis
         /// indicates a distribution with lighter tails.
-        /// 
+        ///
         /// # Arguments
-        /// 
+        ///
         /// * `d` - The slice of floating-point values
         /// * `m` - Optional bitmask for null value handling
         /// * `null_count` - Optional count of null values
         /// * `adjust_sample_bias` - Whether to apply sample bias correction
-        /// 
+        ///
         /// # Returns
-        /// 
+        ///
         /// `Some(kurtosis)` if calculation is possible, `None` if insufficient data
         #[inline(always)]
         pub fn $kurt_fn(
@@ -1725,19 +1738,19 @@ macro_rules! impl_skew_kurt_float {
 macro_rules! impl_skew_kurt_int {
     ($ty:ident, $skew_fn:ident, $kurt_fn:ident) => {
         /// Calculates the skewness of an integer dataset.
-        /// 
+        ///
         /// Skewness measures the asymmetry of the probability distribution.
         /// Values are converted to f64 for calculation to maintain precision.
-        /// 
+        ///
         /// # Arguments
-        /// 
+        ///
         /// * `d` - The slice of integer values
         /// * `m` - Optional bitmask for null value handling
         /// * `null_count` - Optional count of null values
         /// * `adjust_sample_bias` - Whether to apply sample bias correction
-        /// 
+        ///
         /// # Returns
-        /// 
+        ///
         /// `Some(skewness)` if calculation is possible, `None` if insufficient data
         #[inline(always)]
         pub fn $skew_fn(
@@ -1767,19 +1780,19 @@ macro_rules! impl_skew_kurt_int {
         }
 
         /// Calculates the kurtosis of an integer dataset.
-        /// 
+        ///
         /// Kurtosis measures the "tailedness" of the probability distribution.
         /// Values are converted to f64 for calculation to maintain precision.
-        /// 
+        ///
         /// # Arguments
-        /// 
+        ///
         /// * `d` - The slice of integer values
         /// * `m` - Optional bitmask for null value handling
         /// * `null_count` - Optional count of null values
         /// * `adjust_sample_bias` - Whether to apply sample bias correction
-        /// 
+        ///
         /// # Returns
-        /// 
+        ///
         /// `Some(kurtosis)` if calculation is possible, `None` if insufficient data
         #[inline(always)]
         pub fn $kurt_fn(
@@ -2522,13 +2535,13 @@ pub fn count_distinct_f<T: Float + ToBits + Copy>(
     }
 }
 
-/// Computes harmonic mean for integer types, returns `AggResult`.
+/// Computes harmonic mean for integer types.
 #[inline(always)]
 pub fn harmonic_mean_int<T: NumCast + Copy + PartialOrd>(
     d: &[T],
     m: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Option<f64> {
+) -> f64 {
     let has_nulls = match null_count {
         Some(n) => n > 0,
         None => m.is_some(),
@@ -2543,18 +2556,21 @@ pub fn harmonic_mean_int<T: NumCast + Copy + PartialOrd>(
             .collect()
     };
 
-    if v.is_empty() || v.iter().any(|&x| x <= 0.0) {
-        return None;
+    if v.is_empty() {
+        panic!("harmonic_mean_int: input data is empty");
+    }
+    if v.iter().any(|&x| x <= 0.0) {
+        panic!("harmonic_mean_int: non-positive values are invalid");
     }
 
     let n = v.len() as f64;
     let denom: f64 = v.iter().map(|&x| 1.0 / x).sum();
 
     if denom == 0.0 {
-        return None;
+        panic!("harmonic_mean_int: denominator is zero");
     }
 
-    Some(n / denom)
+    n / denom
 }
 
 /// Computes harmonic mean for unsigned integers.
@@ -2563,7 +2579,7 @@ pub fn harmonic_mean_uint<T: NumCast + Copy + PartialOrd>(
     d: &[T],
     m: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Option<f64> {
+) -> f64 {
     harmonic_mean_int(d, m, null_count)
 }
 
@@ -2573,7 +2589,7 @@ pub fn harmonic_mean_f<T: Float + Into<f64> + Copy>(
     d: &[T],
     m: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Option<f64> {
+) -> f64 {
     let has_nulls = match null_count {
         Some(n) => n > 0,
         None => m.is_some(),
@@ -2585,7 +2601,7 @@ pub fn harmonic_mean_f<T: Float + Into<f64> + Copy>(
         for &v in d {
             let x = v.into();
             if x <= 0.0 {
-                return None;
+                panic!("harmonic_mean_f: non-positive values are invalid");
             }
             s += 1.0 / x;
             n += 1;
@@ -2596,7 +2612,7 @@ pub fn harmonic_mean_f<T: Float + Into<f64> + Copy>(
             if unsafe { mb.get_unchecked(i) } {
                 let x = v.into();
                 if x <= 0.0 {
-                    return None;
+                    panic!("harmonic_mean_f: non-positive values are invalid");
                 }
                 s += 1.0 / x;
                 n += 1;
@@ -2604,11 +2620,14 @@ pub fn harmonic_mean_f<T: Float + Into<f64> + Copy>(
         }
     }
 
-    if n == 0 || s == 0.0 {
-        None
-    } else {
-        Some(n as f64 / s)
+    if n == 0 {
+        panic!("harmonic_mean_f: input data is empty");
     }
+    if s == 0.0 {
+        panic!("harmonic_mean_f: denominator is zero");
+    }
+
+    n as f64 / s
 }
 
 /// Computes geometric mean for integer types.
@@ -2617,7 +2636,7 @@ pub fn geometric_mean_int<T: ToPrimitive + Copy>(
     d: &[T],
     m: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Option<f64> {
+) -> f64 {
     let has_nulls = match null_count {
         Some(n) => n > 0,
         None => m.is_some(),
@@ -2626,24 +2645,32 @@ pub fn geometric_mean_int<T: ToPrimitive + Copy>(
     let (mut s, mut n) = (0.0, 0usize);
     if !has_nulls {
         for &v in d.iter() {
-            s += v.to_f64().unwrap().ln();
+            let val = v.to_f64().unwrap();
+            if val <= 0.0 {
+                panic!("geometric_mean_int: non-positive values are invalid");
+            }
+            s += val.ln();
             n += 1;
         }
     } else {
         let mb = m.expect("geometric_mean_int: nulls present but mask is None");
         for (i, &v) in d.iter().enumerate() {
             if unsafe { mb.get_unchecked(i) } {
-                s += v.to_f64().unwrap().ln();
+                let val = v.to_f64().unwrap();
+                if val <= 0.0 {
+                    panic!("geometric_mean_int: non-positive values are invalid");
+                }
+                s += val.ln();
                 n += 1;
             }
         }
     }
 
     if n == 0 {
-        None
-    } else {
-        Some((s / n as f64).exp())
+        panic!("geometric_mean_int: input data is empty");
     }
+
+    (s / n as f64).exp()
 }
 
 /// Computes geometric mean for unsigned integer types.
@@ -2652,7 +2679,7 @@ pub fn geometric_mean_uint<T: ToPrimitive + Copy>(
     d: &[T],
     m: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Option<f64> {
+) -> f64 {
     geometric_mean_int(d, m, null_count)
 }
 
@@ -2662,7 +2689,7 @@ pub fn geometric_mean_f<T: Float + Into<f64> + Copy>(
     d: &[T],
     m: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Option<f64> {
+) -> f64 {
     let has_nulls = match null_count {
         Some(n) => n > 0,
         None => m.is_some(),
@@ -2671,24 +2698,32 @@ pub fn geometric_mean_f<T: Float + Into<f64> + Copy>(
     let (mut s, mut n) = (0.0, 0usize);
     if !has_nulls {
         for &v in d.iter() {
-            s += v.into().ln();
+            let val = v.into();
+            if val <= 0.0 {
+                panic!("geometric_mean_f: non-positive values are invalid");
+            }
+            s += val.ln();
             n += 1;
         }
     } else {
         let mb = m.expect("geometric_mean_f: nulls present but mask is None");
         for (i, &v) in d.iter().enumerate() {
             if unsafe { mb.get_unchecked(i) } {
-                s += v.into().ln();
+                let val = v.into();
+                if val <= 0.0 {
+                    panic!("geometric_mean_f: non-positive values are invalid");
+                }
+                s += val.ln();
                 n += 1;
             }
         }
     }
 
     if n == 0 {
-        None
-    } else {
-        Some((s / n as f64).exp())
+        panic!("geometric_mean_f: input data is empty");
     }
+
+    (s / n as f64).exp()
 }
 
 /// Returns the accumulating product of all values
@@ -2939,25 +2974,18 @@ mod tests {
     #[test]
     fn test_harmonic_and_geometric_mean() {
         let data = vec64![1.0f64, 2.0, 4.0];
-        if let Some(hm) = harmonic_mean_f(&data, None, None) {
-            assert!(approx_eq(hm, 1.714285714, 1e-6));
-        } else {
-            panic!("Expected F64");
-        }
+        let hm = harmonic_mean_f(&data, None, None);
+        assert!(approx_eq(hm, 1.714285714, 1e-6));
 
-        if let Some(gm) = geometric_mean_f(&data, None, None) {
-            assert!(approx_eq(gm, 2.0, 1e-6));
-        } else {
-            panic!("Expected F64");
-        }
+        let gm = geometric_mean_f(&data, None, None);
+        assert!(approx_eq(gm, 2.0, 1e-6));
 
         let data = vec64![1i32, 2, 4];
-        if let Some(hm) = harmonic_mean_int(&data, None, None) {
-            assert!(approx_eq(hm, 1.714285714, 1e-6));
-        }
-        if let Some(gm) = geometric_mean_int(&data, None, None) {
-            assert!(approx_eq(gm, 2.0, 1e-6));
-        }
+        let hm = harmonic_mean_int(&data, None, None);
+        assert!(approx_eq(hm, 1.714285714, 1e-6));
+
+        let gm = geometric_mean_int(&data, None, None);
+        assert!(approx_eq(gm, 2.0, 1e-6));
     }
 
     #[test]
@@ -3243,47 +3271,41 @@ mod tests {
     #[test]
     fn test_harmonic_mean_f64() {
         let data = vec64![0.5f64, 2.0, 1.0];
-        if let Some(hm) = harmonic_mean_f(&data, None, None) {
-            // the true harmonic mean is 3/(2 + 0.5 + 1) ≈ 0.8571
-            assert!(approx_eq(hm, 0.857142857, 1e-2));
-        } else {
-            panic!("Expected F64 result for harmonic mean f64");
-        }
+        // the true harmonic mean is 3/(2 + 0.5 + 1) ≈ 0.8571
+        let hm = harmonic_mean_f(&data, None, None);
+        assert!(approx_eq(hm, 0.857142857, 1e-2));
     }
 
     #[test]
     fn test_geometric_mean_f64() {
         let data = vec64![0.5f64, 2.0, 1.0];
-        if let Some(gm) = geometric_mean_f(&data, None, None) {
-            assert!(approx_eq(gm, 1.0, 1e-9));
-        } else {
-            panic!("Expected F64 result for geometric mean f64");
-        }
+        let gm = geometric_mean_f(&data, None, None);
+        assert!(approx_eq(gm, 1.0, 1e-9));
     }
 
     #[test]
+    #[should_panic(expected = "harmonic_mean_int: non-positive values are invalid")]
     fn test_harmonic_mean_int_all_zeros() {
         let d = vec64![0i32, 0, 0];
-        assert_eq!(harmonic_mean_int(&d, None, None), None);
+        // Panics due to non-positive values.
+        let _ = harmonic_mean_int(&d, None, None);
     }
 
     #[test]
     fn test_geometric_mean_uint() {
         let data = vec64![2u64, 8, 4];
-        if let Some(gm) = geometric_mean_uint(&data, None, None) {
-            assert!(approx_eq(gm, 4.0, 1e-9));
-        } else {
-            panic!("Expected F64 result for geometric mean uint");
-        }
+        let gm = geometric_mean_uint(&data, None, None);
+        assert!(approx_eq(gm, 4.0, 1e-9));
     }
 
     #[test]
+    #[should_panic(expected = "geometric_mean_int: non-positive values are invalid")]
     fn test_geometric_mean_int_negative() {
-        // Should not panic on negative input, even if result is complex
+        // Should panic on negative input, even if result is complex
         let d = vec64![-2i64, -4, -8];
         let _ = geometric_mean_int(&d, None, None);
     }
-
+    
     // --- percentile: boundary and empty, floats with mask, p out of range ---
     #[test]
     fn test_percentile_ord_and_f_all_cases() {

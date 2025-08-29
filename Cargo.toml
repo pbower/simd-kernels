@@ -1,7 +1,7 @@
 [package]
 name = "simd-kernels"
 description = "Lightning Fast, Arrow-Compatible Compute Kernels"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 authors = ['Peter Bower']
 license-file = "LICENSE"
@@ -24,8 +24,6 @@ blas = { version = "0.23.0", optional = true }
 lapack = { version = "0.20.0", optional = true }
 ahash = { version = "0.8.12", optional = true }
 rand = "0.9.1"
-serde = { version = "1.0", features = ["derive"], optional = true }
-serde_json = { version = "1.0", optional = true }
 
 [build-dependencies]
 cc = { version = "1", optional = true }
