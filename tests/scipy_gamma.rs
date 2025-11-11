@@ -1,7 +1,3 @@
-// AUTO-GENERATED FILE. DO NOT EDIT BY HAND.
-// Generated from SciPy 1.16.1 on 2025-08-21T22:25:23Z.
-// Distribution: Beta
-//
 // This file is created by gen_scipy_tests.py and contains reference
 // tests whose expected values are produced by SciPy at generation time.
 //
@@ -18,7 +14,7 @@ mod scipy_gamma_tests {
         gamma_cdf, gamma_pdf, gamma_quantile,
     };
 
-    // TODO: Fix source for large_shape_2
+    // TODO[5]: Fix source for large_shape_2. re-running the Scipy file generation will ruin this file
 
     #[test]
     fn gamma_pdf_exponential() {

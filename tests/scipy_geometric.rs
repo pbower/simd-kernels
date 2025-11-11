@@ -1,7 +1,3 @@
-// AUTO-GENERATED FILE. DO NOT EDIT BY HAND.
-// Generated from SciPy 1.16.1 on 2025-08-21T22:25:23Z.
-// Distribution: Beta
-//
 // This file is created by gen_scipy_tests.py and contains reference
 // tests whose expected values are produced by SciPy at generation time.
 //
@@ -18,7 +14,9 @@ mod scipy_geometric_tests {
         geometric_cdf, geometric_pmf, geometric_quantile,
     };
 
-    // TODO: Fix source Including Non-Decimal 'k'
+    // TODO[5]: Fix source Including Non-Decimal 'k'
+    // Re-running the Scipy file generation will ruin this file
+
     // use simd_kernels::kernels::scientific::distributions::discrete::geometric::{geometric_pmf, geometric_cdf, geometric_quantile};
 
     #[test]

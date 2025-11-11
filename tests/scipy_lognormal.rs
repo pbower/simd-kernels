@@ -1,7 +1,3 @@
-// AUTO-GENERATED FILE. DO NOT EDIT BY HAND.
-// Generated from SciPy 1.16.1 on 2025-08-21T22:25:23Z.
-// Distribution: Beta
-//
 // This file is created by gen_scipy_tests.py and contains reference
 // tests whose expected values are produced by SciPy at generation time.
 //
@@ -17,7 +13,8 @@ mod scipy_lognormal_tests {
     use simd_kernels::kernels::scientific::distributions::univariate::lognormal::{
         lognormal_cdf, lognormal_pdf, lognormal_quantile,
     };
-    // TODO: Fix decimal points as source
+    // TODO[5]: Fix decimal points as source
+    // Re-running the Scipy file generation will ruin this file
 
     #[test]
     fn lognormal_pdf_standard() {

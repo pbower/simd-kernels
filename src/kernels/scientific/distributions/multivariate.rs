@@ -1308,7 +1308,7 @@ pub fn multinomial_sample(
     cum[k - 1] = 1.0;
 
     for _ in 0..n_samples {
-        // initialize counts
+        // initialise counts
         let mut counts = vec![0u64; k];
         for _ in 0..n {
             let u: f64 = rng.random::<f64>();

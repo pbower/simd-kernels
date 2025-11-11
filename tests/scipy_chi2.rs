@@ -1,10 +1,8 @@
-// AUTO-GENERATED FILE. DO NOT EDIT BY HAND.
 // Generated from SciPy 1.16.1 on 2025-08-21T22:25:23Z.
 // Distribution: Beta
 //
 // This file is created by gen_scipy_tests.py and contains reference
 // tests whose expected values are produced by SciPy at generation time.
-//
 
 // Each test compares our kernel outputs against SciPy with a per-test tolerance.
 // NaN/Inf equality is handled by util::assert_slice_close.
@@ -18,7 +16,7 @@ mod scipy_chi2_tests {
         chi_square_cdf, chi_square_pdf, chi_square_quantile,
     };
 
-    // TODO: Fix source
+    // TODO[5]: Fix source - re-running the Scipy file generation will ruin this file
     // use simd_kernels::kernels::scientific::distributions::univariate::chi2::{chi2_pdf, chi2_cdf, chi_square_quantile};
     // + .to_values() + df float
 
