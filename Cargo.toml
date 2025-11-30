@@ -1,7 +1,7 @@
 [package]
 name = "simd-kernels"
 description = "Lightning Fast, Arrow-Compatible Compute Kernels"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 authors = ['Peter Bower']
 license-file = "LICENSE"
@@ -19,8 +19,17 @@ ordered-float = { version = "5.0.0", optional = true }
 num-complex = { version = "0.4.6", optional = true }
 blas = { version = "0.23.0", optional = true }
 lapack = { version = "0.20.0", optional = true }
+blas-src = { version = "0.10", features = ["openblas"], optional = true }
+lapack-src = { version = "0.10", features = ["openblas"], optional = true }
+openblas-src = { version = "0.10", features = ["system"], optional = true }
 ahash = { version = "0.8.12", optional = true }
 rand = "0.9.1"
+
+# Parallel sorting
+rayon = { version = "1.10", optional = true }
+
+# SIMD-accelerated sorting
+voracious_radix_sort = { version = "1.2", optional = true }
 
 [build-dependencies]
 cc = { version = "1", optional = true }
@@ -40,7 +49,7 @@ fast_hash = ["dep:ahash"]
 # https://www.intel.com/content/www/us/en/developer/articles/tool/onemkl-license-faq.html
 #
 # ⚠️ Warning: Multivariate modules are still under development, and are not fully tested.
-linear_algebra = ["blas", "lapack"]
+linear_algebra = ["blas", "lapack", "blas-src", "lapack-src", "openblas-src"]
 
 # Arbitrary element-wise functions. This pattern provides the basis,
 # and it is extendable to any set.
@@ -50,6 +59,12 @@ fourier_transforms = ["dep:num-complex"]
 # Enables CDF and PDF probability distributions
 probability_distributions = []
 extended_numeric_types = ["minarrow/extended_numeric_types"]
+
+# Parallel sorting using rayon
+parallel_sort = ["dep:rayon"]
+
+# SIMD-accelerated radix sort for maximum integer sorting performance
+simd_sort = ["dep:voracious_radix_sort"]
 
 default = [
     "large_string",

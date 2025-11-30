@@ -634,7 +634,7 @@ pub fn wishart_pdf(
     }
     // id now holds Σ⁻¹ in its lower triangle
 
-    // normalization constant
+    // normalisation constant
     let half_df = df * 0.5;
     let ln_norm = half_df * d as f64 * df.ln()  // 2^{νd/2} in denom -> −(νd/2) ln2
         + ln_multivariate_gamma(d, half_df)
@@ -1157,7 +1157,7 @@ pub fn dirichlet_pdf(
             "dirichlet_pdf: x must sum to 1".into(),
         ));
     }
-    // normalization
+    // normalisation
     let mut sum_alpha = 0.0;
     for &a in alpha {
         sum_alpha += a;

@@ -31,7 +31,7 @@ pub fn student_t_pdf_std(
             "student_t_pdf: invalid df".into(),
         ));
     }
-    // 2) precompute the normalizing constant
+    // 2) precompute the normalising constant
     let coeff =
         (ln_gamma((df + 1.0) * 0.5) - ln_gamma(df * 0.5) - 0.5 * (df * std::f64::consts::PI).ln())
             .exp();

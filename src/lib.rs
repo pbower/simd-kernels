@@ -8,6 +8,11 @@
 #![feature(portable_simd)]
 #![feature(float_erf)]
 
+// Link OpenBLAS when linear_algebra feature is enabled.
+// This forces the linker to include the OpenBLAS symbols.
+#[cfg(feature = "linear_algebra")]
+extern crate openblas_src;
+
 // compile with RUSTFLAGS="-C target-cpu=native" cargo +nightly build --features portable_simd
 
 pub mod operators;
