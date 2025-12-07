@@ -509,7 +509,11 @@ pub fn argsort_str(data: &[&str], descending: bool) -> Vec<usize> {
 ///
 /// Returns indices that would sort the strings lexicographically
 pub fn argsort_string_array(offsets: &[usize], values: &str, descending: bool) -> Vec<usize> {
-    let n = if offsets.is_empty() { 0 } else { offsets.len() - 1 };
+    let n = if offsets.is_empty() {
+        0
+    } else {
+        offsets.len() - 1
+    };
     if n == 0 {
         return vec![];
     }
@@ -552,7 +556,7 @@ pub fn argsort_categorical_lexical<T: Ord + Copy + Zero + NumCast + Integer>(
 
         let ordering = match (a_is_null, b_is_null) {
             (true, true) => Ordering::Equal,
-            (true, false) => Ordering::Less,  // nulls first
+            (true, false) => Ordering::Less, // nulls first
             (false, true) => Ordering::Greater,
             (false, false) => {
                 let a_key = &cat.unique_values[cat.data[i].to_usize()];
@@ -614,9 +618,9 @@ pub fn argsort_categorical_custom<T: Ord + Copy + Zero + NumCast + Integer>(
 
                 match (a_pos, b_pos) {
                     (Some(ap), Some(bp)) => ap.cmp(bp),
-                    (Some(_), None) => Ordering::Less,  // defined order comes first
+                    (Some(_), None) => Ordering::Less, // defined order comes first
                     (None, Some(_)) => Ordering::Greater,
-                    (None, None) => a_key.cmp(b_key),  // fall back to lexical
+                    (None, None) => a_key.cmp(b_key), // fall back to lexical
                 }
             }
         };
@@ -634,7 +638,11 @@ pub fn argsort_categorical_custom<T: Ord + Copy + Zero + NumCast + Integer>(
 /// Argsort for boolean arrays - false sorts before true
 ///
 /// Nulls sort first (ascending) or last (descending).
-pub fn argsort_boolean(data: &Bitmask, null_mask: Option<&Bitmask>, descending: bool) -> Vec<usize> {
+pub fn argsort_boolean(
+    data: &Bitmask,
+    null_mask: Option<&Bitmask>,
+    descending: bool,
+) -> Vec<usize> {
     let n = data.len;
     if n == 0 {
         return vec![];
@@ -770,7 +778,10 @@ pub fn argsort_radix_i32(data: &[i32], descending: bool) -> Vec<usize> {
 
 /// LSD Radix argsort for i64 - uses sign-bit flipping for proper signed ordering
 pub fn argsort_radix_i64(data: &[i64], descending: bool) -> Vec<usize> {
-    let unsigned: Vec<u64> = data.iter().map(|&x| (x as u64) ^ 0x8000_0000_0000_0000).collect();
+    let unsigned: Vec<u64> = data
+        .iter()
+        .map(|&x| (x as u64) ^ 0x8000_0000_0000_0000)
+        .collect();
     argsort_radix_u64(&unsigned, descending)
 }
 
@@ -985,7 +996,11 @@ pub mod parallel_argsort {
     use rayon::prelude::*;
 
     /// Parallel comparison-based argsort
-    pub fn argsort_parallel<T: Ord + Sync>(data: &[T], descending: bool, stable: bool) -> Vec<usize> {
+    pub fn argsort_parallel<T: Ord + Sync>(
+        data: &[T],
+        descending: bool,
+        stable: bool,
+    ) -> Vec<usize> {
         let n = data.len();
         if n == 0 {
             return vec![];
@@ -1663,16 +1678,37 @@ mod tests {
         fn test_i32_sorts_produce_same_results() {
             // Test data with duplicates, negatives, and edge cases
             let data = vec![
-                5i32, -2, 8, -1, 9, 3, -7, 4, 6, 0,
-                i32::MAX, i32::MIN, 0, -100, 100,
-                1, 1, 1, -1, -1, // duplicates
+                5i32,
+                -2,
+                8,
+                -1,
+                9,
+                3,
+                -7,
+                4,
+                6,
+                0,
+                i32::MAX,
+                i32::MIN,
+                0,
+                -100,
+                100,
+                1,
+                1,
+                1,
+                -1,
+                -1, // duplicates
             ];
 
             // Get indices from each algorithm
             let comparison_asc = argsort(&data, false);
             let radix_asc = argsort_radix_i32(&data, false);
-            let auto_comparison = argsort_auto_i32(&data, &ArgsortConfig::new().algorithm(SortAlgorithm::Comparison));
-            let auto_radix = argsort_auto_i32(&data, &ArgsortConfig::new().algorithm(SortAlgorithm::Radix));
+            let auto_comparison = argsort_auto_i32(
+                &data,
+                &ArgsortConfig::new().algorithm(SortAlgorithm::Comparison),
+            );
+            let auto_radix =
+                argsort_auto_i32(&data, &ArgsortConfig::new().algorithm(SortAlgorithm::Radix));
             let auto_default = argsort_auto_i32(&data, &ArgsortConfig::default());
 
             // Convert to sorted values
@@ -1683,14 +1719,30 @@ mod tests {
             let sorted_auto_default: Vec<i32> = apply_indices(&data, &auto_default);
 
             // All should produce the same sorted order
-            assert_eq!(sorted_comparison, sorted_radix, "comparison vs radix mismatch");
-            assert_eq!(sorted_comparison, sorted_auto_comparison, "comparison vs auto_comparison mismatch");
-            assert_eq!(sorted_comparison, sorted_auto_radix, "comparison vs auto_radix mismatch");
-            assert_eq!(sorted_comparison, sorted_auto_default, "comparison vs auto_default mismatch");
+            assert_eq!(
+                sorted_comparison, sorted_radix,
+                "comparison vs radix mismatch"
+            );
+            assert_eq!(
+                sorted_comparison, sorted_auto_comparison,
+                "comparison vs auto_comparison mismatch"
+            );
+            assert_eq!(
+                sorted_comparison, sorted_auto_radix,
+                "comparison vs auto_radix mismatch"
+            );
+            assert_eq!(
+                sorted_comparison, sorted_auto_default,
+                "comparison vs auto_default mismatch"
+            );
 
             // Verify it's actually sorted
             for i in 1..sorted_comparison.len() {
-                assert!(sorted_comparison[i-1] <= sorted_comparison[i], "not sorted at index {}", i);
+                assert!(
+                    sorted_comparison[i - 1] <= sorted_comparison[i],
+                    "not sorted at index {}",
+                    i
+                );
             }
 
             // Test descending too
@@ -1700,94 +1752,192 @@ mod tests {
             let sorted_comparison_desc: Vec<i32> = apply_indices(&data, &comparison_desc);
             let sorted_radix_desc: Vec<i32> = apply_indices(&data, &radix_desc);
 
-            assert_eq!(sorted_comparison_desc, sorted_radix_desc, "descending comparison vs radix mismatch");
+            assert_eq!(
+                sorted_comparison_desc, sorted_radix_desc,
+                "descending comparison vs radix mismatch"
+            );
 
             // Verify descending order
             for i in 1..sorted_comparison_desc.len() {
-                assert!(sorted_comparison_desc[i-1] >= sorted_comparison_desc[i], "not sorted descending at index {}", i);
+                assert!(
+                    sorted_comparison_desc[i - 1] >= sorted_comparison_desc[i],
+                    "not sorted descending at index {}",
+                    i
+                );
             }
         }
 
         #[test]
         fn test_i64_sorts_produce_same_results() {
             let data = vec![
-                5i64, -2, 8, -1, 9, 3, -7, 4, 6, 0,
-                i64::MAX, i64::MIN, 0, -100, 100,
-                i64::MAX - 1, i64::MIN + 1,
+                5i64,
+                -2,
+                8,
+                -1,
+                9,
+                3,
+                -7,
+                4,
+                6,
+                0,
+                i64::MAX,
+                i64::MIN,
+                0,
+                -100,
+                100,
+                i64::MAX - 1,
+                i64::MIN + 1,
             ];
 
             let comparison_asc = argsort(&data, false);
             let radix_asc = argsort_radix_i64(&data, false);
-            let auto_comparison = argsort_auto_i64(&data, &ArgsortConfig::new().algorithm(SortAlgorithm::Comparison));
-            let auto_radix = argsort_auto_i64(&data, &ArgsortConfig::new().algorithm(SortAlgorithm::Radix));
+            let auto_comparison = argsort_auto_i64(
+                &data,
+                &ArgsortConfig::new().algorithm(SortAlgorithm::Comparison),
+            );
+            let auto_radix =
+                argsort_auto_i64(&data, &ArgsortConfig::new().algorithm(SortAlgorithm::Radix));
 
             let sorted_comparison: Vec<i64> = apply_indices(&data, &comparison_asc);
             let sorted_radix: Vec<i64> = apply_indices(&data, &radix_asc);
             let sorted_auto_comparison: Vec<i64> = apply_indices(&data, &auto_comparison);
             let sorted_auto_radix: Vec<i64> = apply_indices(&data, &auto_radix);
 
-            assert_eq!(sorted_comparison, sorted_radix, "i64: comparison vs radix mismatch");
-            assert_eq!(sorted_comparison, sorted_auto_comparison, "i64: comparison vs auto_comparison mismatch");
-            assert_eq!(sorted_comparison, sorted_auto_radix, "i64: comparison vs auto_radix mismatch");
+            assert_eq!(
+                sorted_comparison, sorted_radix,
+                "i64: comparison vs radix mismatch"
+            );
+            assert_eq!(
+                sorted_comparison, sorted_auto_comparison,
+                "i64: comparison vs auto_comparison mismatch"
+            );
+            assert_eq!(
+                sorted_comparison, sorted_auto_radix,
+                "i64: comparison vs auto_radix mismatch"
+            );
 
             // Verify sorted
             for i in 1..sorted_comparison.len() {
-                assert!(sorted_comparison[i-1] <= sorted_comparison[i], "i64: not sorted at index {}", i);
+                assert!(
+                    sorted_comparison[i - 1] <= sorted_comparison[i],
+                    "i64: not sorted at index {}",
+                    i
+                );
             }
         }
 
         #[test]
         fn test_u32_sorts_produce_same_results() {
             let data = vec![
-                5u32, 2, 8, 1, 9, 3, 7, 4, 6, 0,
-                u32::MAX, 0, 100, u32::MAX - 1,
-                1, 1, 1, // duplicates
+                5u32,
+                2,
+                8,
+                1,
+                9,
+                3,
+                7,
+                4,
+                6,
+                0,
+                u32::MAX,
+                0,
+                100,
+                u32::MAX - 1,
+                1,
+                1,
+                1, // duplicates
             ];
 
             let comparison_asc = argsort(&data, false);
             let radix_asc = argsort_radix_u32(&data, false);
-            let auto_comparison = argsort_auto_u32(&data, &ArgsortConfig::new().algorithm(SortAlgorithm::Comparison));
-            let auto_radix = argsort_auto_u32(&data, &ArgsortConfig::new().algorithm(SortAlgorithm::Radix));
+            let auto_comparison = argsort_auto_u32(
+                &data,
+                &ArgsortConfig::new().algorithm(SortAlgorithm::Comparison),
+            );
+            let auto_radix =
+                argsort_auto_u32(&data, &ArgsortConfig::new().algorithm(SortAlgorithm::Radix));
 
             let sorted_comparison: Vec<u32> = apply_indices(&data, &comparison_asc);
             let sorted_radix: Vec<u32> = apply_indices(&data, &radix_asc);
             let sorted_auto_comparison: Vec<u32> = apply_indices(&data, &auto_comparison);
             let sorted_auto_radix: Vec<u32> = apply_indices(&data, &auto_radix);
 
-            assert_eq!(sorted_comparison, sorted_radix, "u32: comparison vs radix mismatch");
-            assert_eq!(sorted_comparison, sorted_auto_comparison, "u32: comparison vs auto_comparison mismatch");
-            assert_eq!(sorted_comparison, sorted_auto_radix, "u32: comparison vs auto_radix mismatch");
+            assert_eq!(
+                sorted_comparison, sorted_radix,
+                "u32: comparison vs radix mismatch"
+            );
+            assert_eq!(
+                sorted_comparison, sorted_auto_comparison,
+                "u32: comparison vs auto_comparison mismatch"
+            );
+            assert_eq!(
+                sorted_comparison, sorted_auto_radix,
+                "u32: comparison vs auto_radix mismatch"
+            );
 
             // Verify sorted
             for i in 1..sorted_comparison.len() {
-                assert!(sorted_comparison[i-1] <= sorted_comparison[i], "u32: not sorted at index {}", i);
+                assert!(
+                    sorted_comparison[i - 1] <= sorted_comparison[i],
+                    "u32: not sorted at index {}",
+                    i
+                );
             }
         }
 
         #[test]
         fn test_u64_sorts_produce_same_results() {
             let data = vec![
-                5u64, 2, 8, 1, 9, 3, 7, 4, 6, 0,
-                u64::MAX, 0, 100, u64::MAX - 1,
+                5u64,
+                2,
+                8,
+                1,
+                9,
+                3,
+                7,
+                4,
+                6,
+                0,
+                u64::MAX,
+                0,
+                100,
+                u64::MAX - 1,
             ];
 
             let comparison_asc = argsort(&data, false);
             let radix_asc = argsort_radix_u64(&data, false);
-            let auto_comparison = argsort_auto_u64(&data, &ArgsortConfig::new().algorithm(SortAlgorithm::Comparison));
-            let auto_radix = argsort_auto_u64(&data, &ArgsortConfig::new().algorithm(SortAlgorithm::Radix));
+            let auto_comparison = argsort_auto_u64(
+                &data,
+                &ArgsortConfig::new().algorithm(SortAlgorithm::Comparison),
+            );
+            let auto_radix =
+                argsort_auto_u64(&data, &ArgsortConfig::new().algorithm(SortAlgorithm::Radix));
 
             let sorted_comparison: Vec<u64> = apply_indices(&data, &comparison_asc);
             let sorted_radix: Vec<u64> = apply_indices(&data, &radix_asc);
             let sorted_auto_comparison: Vec<u64> = apply_indices(&data, &auto_comparison);
             let sorted_auto_radix: Vec<u64> = apply_indices(&data, &auto_radix);
 
-            assert_eq!(sorted_comparison, sorted_radix, "u64: comparison vs radix mismatch");
-            assert_eq!(sorted_comparison, sorted_auto_comparison, "u64: comparison vs auto_comparison mismatch");
-            assert_eq!(sorted_comparison, sorted_auto_radix, "u64: comparison vs auto_radix mismatch");
+            assert_eq!(
+                sorted_comparison, sorted_radix,
+                "u64: comparison vs radix mismatch"
+            );
+            assert_eq!(
+                sorted_comparison, sorted_auto_comparison,
+                "u64: comparison vs auto_comparison mismatch"
+            );
+            assert_eq!(
+                sorted_comparison, sorted_auto_radix,
+                "u64: comparison vs auto_radix mismatch"
+            );
 
             // Verify sorted
             for i in 1..sorted_comparison.len() {
-                assert!(sorted_comparison[i-1] <= sorted_comparison[i], "u64: not sorted at index {}", i);
+                assert!(
+                    sorted_comparison[i - 1] <= sorted_comparison[i],
+                    "u64: not sorted at index {}",
+                    i
+                );
             }
         }
 
@@ -1797,24 +1947,51 @@ mod tests {
             use super::simd_argsort;
 
             let data = vec![
-                5i32, -2, 8, -1, 9, 3, -7, 4, 6, 0,
-                i32::MAX, i32::MIN, 0, -100, 100,
-                1, 1, 1, -1, -1,
+                5i32,
+                -2,
+                8,
+                -1,
+                9,
+                3,
+                -7,
+                4,
+                6,
+                0,
+                i32::MAX,
+                i32::MIN,
+                0,
+                -100,
+                100,
+                1,
+                1,
+                1,
+                -1,
+                -1,
             ];
 
             let comparison_asc = argsort(&data, false);
             let radix_asc = argsort_radix_i32(&data, false);
             let simd_asc = simd_argsort::argsort_simd_i32(&data, false);
-            let auto_simd = argsort_auto_i32(&data, &ArgsortConfig::new().algorithm(SortAlgorithm::Simd));
+            let auto_simd =
+                argsort_auto_i32(&data, &ArgsortConfig::new().algorithm(SortAlgorithm::Simd));
 
             let sorted_comparison: Vec<i32> = apply_indices(&data, &comparison_asc);
             let sorted_radix: Vec<i32> = apply_indices(&data, &radix_asc);
             let sorted_simd: Vec<i32> = apply_indices(&data, &simd_asc);
             let sorted_auto_simd: Vec<i32> = apply_indices(&data, &auto_simd);
 
-            assert_eq!(sorted_comparison, sorted_radix, "simd test: comparison vs radix mismatch");
-            assert_eq!(sorted_comparison, sorted_simd, "simd test: comparison vs simd mismatch");
-            assert_eq!(sorted_comparison, sorted_auto_simd, "simd test: comparison vs auto_simd mismatch");
+            assert_eq!(
+                sorted_comparison, sorted_radix,
+                "simd test: comparison vs radix mismatch"
+            );
+            assert_eq!(
+                sorted_comparison, sorted_simd,
+                "simd test: comparison vs simd mismatch"
+            );
+            assert_eq!(
+                sorted_comparison, sorted_auto_simd,
+                "simd test: comparison vs auto_simd mismatch"
+            );
         }
 
         #[cfg(feature = "simd_sort")]
@@ -1823,8 +2000,21 @@ mod tests {
             use super::simd_argsort;
 
             let data = vec![
-                5i64, -2, 8, -1, 9, 3, -7, 4, 6, 0,
-                i64::MAX, i64::MIN, 0, -100, 100,
+                5i64,
+                -2,
+                8,
+                -1,
+                9,
+                3,
+                -7,
+                4,
+                6,
+                0,
+                i64::MAX,
+                i64::MIN,
+                0,
+                -100,
+                100,
             ];
 
             let comparison_asc = argsort(&data, false);
@@ -1835,8 +2025,14 @@ mod tests {
             let sorted_radix: Vec<i64> = apply_indices(&data, &radix_asc);
             let sorted_simd: Vec<i64> = apply_indices(&data, &simd_asc);
 
-            assert_eq!(sorted_comparison, sorted_radix, "simd i64: comparison vs radix mismatch");
-            assert_eq!(sorted_comparison, sorted_simd, "simd i64: comparison vs simd mismatch");
+            assert_eq!(
+                sorted_comparison, sorted_radix,
+                "simd i64: comparison vs radix mismatch"
+            );
+            assert_eq!(
+                sorted_comparison, sorted_simd,
+                "simd i64: comparison vs simd mismatch"
+            );
         }
 
         #[cfg(feature = "simd_sort")]
@@ -1845,8 +2041,20 @@ mod tests {
             use super::simd_argsort;
 
             let data = vec![
-                5u32, 2, 8, 1, 9, 3, 7, 4, 6, 0,
-                u32::MAX, 0, 100, u32::MAX - 1,
+                5u32,
+                2,
+                8,
+                1,
+                9,
+                3,
+                7,
+                4,
+                6,
+                0,
+                u32::MAX,
+                0,
+                100,
+                u32::MAX - 1,
             ];
 
             let comparison_asc = argsort(&data, false);
@@ -1857,8 +2065,14 @@ mod tests {
             let sorted_radix: Vec<u32> = apply_indices(&data, &radix_asc);
             let sorted_simd: Vec<u32> = apply_indices(&data, &simd_asc);
 
-            assert_eq!(sorted_comparison, sorted_radix, "simd u32: comparison vs radix mismatch");
-            assert_eq!(sorted_comparison, sorted_simd, "simd u32: comparison vs simd mismatch");
+            assert_eq!(
+                sorted_comparison, sorted_radix,
+                "simd u32: comparison vs radix mismatch"
+            );
+            assert_eq!(
+                sorted_comparison, sorted_simd,
+                "simd u32: comparison vs simd mismatch"
+            );
         }
 
         #[cfg(feature = "simd_sort")]
@@ -1867,8 +2081,20 @@ mod tests {
             use super::simd_argsort;
 
             let data = vec![
-                5u64, 2, 8, 1, 9, 3, 7, 4, 6, 0,
-                u64::MAX, 0, 100, u64::MAX - 1,
+                5u64,
+                2,
+                8,
+                1,
+                9,
+                3,
+                7,
+                4,
+                6,
+                0,
+                u64::MAX,
+                0,
+                100,
+                u64::MAX - 1,
             ];
 
             let comparison_asc = argsort(&data, false);
@@ -1879,8 +2105,14 @@ mod tests {
             let sorted_radix: Vec<u64> = apply_indices(&data, &radix_asc);
             let sorted_simd: Vec<u64> = apply_indices(&data, &simd_asc);
 
-            assert_eq!(sorted_comparison, sorted_radix, "simd u64: comparison vs radix mismatch");
-            assert_eq!(sorted_comparison, sorted_simd, "simd u64: comparison vs simd mismatch");
+            assert_eq!(
+                sorted_comparison, sorted_radix,
+                "simd u64: comparison vs radix mismatch"
+            );
+            assert_eq!(
+                sorted_comparison, sorted_simd,
+                "simd u64: comparison vs simd mismatch"
+            );
         }
 
         #[cfg(feature = "parallel_sort")]
@@ -1889,9 +2121,26 @@ mod tests {
             use super::parallel_argsort;
 
             let data = vec![
-                5i32, -2, 8, -1, 9, 3, -7, 4, 6, 0,
-                i32::MAX, i32::MIN, 0, -100, 100,
-                1, 1, 1, -1, -1,
+                5i32,
+                -2,
+                8,
+                -1,
+                9,
+                3,
+                -7,
+                4,
+                6,
+                0,
+                i32::MAX,
+                i32::MIN,
+                0,
+                -100,
+                100,
+                1,
+                1,
+                1,
+                -1,
+                -1,
             ];
 
             let comparison_asc = argsort(&data, false);
@@ -1902,8 +2151,14 @@ mod tests {
             let sorted_parallel_stable: Vec<i32> = apply_indices(&data, &parallel_stable);
             let sorted_parallel_unstable: Vec<i32> = apply_indices(&data, &parallel_unstable);
 
-            assert_eq!(sorted_comparison, sorted_parallel_stable, "parallel: comparison vs parallel_stable mismatch");
-            assert_eq!(sorted_comparison, sorted_parallel_unstable, "parallel: comparison vs parallel_unstable mismatch");
+            assert_eq!(
+                sorted_comparison, sorted_parallel_stable,
+                "parallel: comparison vs parallel_stable mismatch"
+            );
+            assert_eq!(
+                sorted_comparison, sorted_parallel_unstable,
+                "parallel: comparison vs parallel_unstable mismatch"
+            );
         }
 
         /// Test with larger dataset to stress-test algorithm correctness
@@ -1924,11 +2179,18 @@ mod tests {
             let sorted_comparison: Vec<i32> = apply_indices(&data, &comparison_asc);
             let sorted_radix: Vec<i32> = apply_indices(&data, &radix_asc);
 
-            assert_eq!(sorted_comparison, sorted_radix, "large dataset: comparison vs radix mismatch");
+            assert_eq!(
+                sorted_comparison, sorted_radix,
+                "large dataset: comparison vs radix mismatch"
+            );
 
             // Verify it's actually sorted
             for i in 1..sorted_comparison.len() {
-                assert!(sorted_comparison[i-1] <= sorted_comparison[i], "large dataset: not sorted at index {}", i);
+                assert!(
+                    sorted_comparison[i - 1] <= sorted_comparison[i],
+                    "large dataset: not sorted at index {}",
+                    i
+                );
             }
         }
     }
