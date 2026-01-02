@@ -62,7 +62,95 @@ fn merge_bitmasks_to_new(a: Option<&Bitmask>, b: Option<&Bitmask>, len: usize) -
 // Int and float
 
 macro_rules! impl_cmp_numeric {
-    ($fn_name:ident, $ty:ty, $lanes:expr, $mask_elem:ty) => {
+    ($fn_name:ident, $fn_name_to:ident, $ty:ty, $lanes:expr, $mask_elem:ty) => {
+        /// Zero-allocation variant: writes directly to caller's output buffer.
+        ///
+        /// Type-specific SIMD-accelerated comparison function with vectorised operations.
+        /// Panics if output capacity < lhs.len().
+        #[inline(always)]
+        pub fn $fn_name_to(
+            lhs: &[$ty],
+            rhs: &[$ty],
+            mask: Option<&Bitmask>,
+            op: ComparisonOperator,
+            output: &mut Bitmask,
+        ) -> Result<(), KernelError> {
+            let len = lhs.len();
+            confirm_equal_len("compare numeric length mismatch", len, rhs.len())?;
+            assert!(output.capacity() >= len, concat!(stringify!($fn_name_to), ": output capacity too small"));
+            let has_nulls = mask.is_some();
+
+            #[cfg(feature = "simd")]
+            {
+                // Check if both arrays are 64-byte aligned for SIMD
+                if is_simd_aligned(lhs) && is_simd_aligned(rhs) {
+                    use std::simd::cmp::{SimdPartialEq, SimdPartialOrd};
+                    const N: usize = $lanes;
+                    if !has_nulls {
+                        let mut i = 0;
+                        while i + N <= len {
+                            let a = Simd::<$ty, N>::from_slice(&lhs[i..i + N]);
+                            let b = Simd::<$ty, N>::from_slice(&rhs[i..i + N]);
+                            let m: Mask<$mask_elem, N> = match op {
+                                ComparisonOperator::Equals => a.simd_eq(b),
+                                ComparisonOperator::NotEquals => a.simd_ne(b),
+                                ComparisonOperator::LessThan => a.simd_lt(b),
+                                ComparisonOperator::LessThanOrEqualTo => a.simd_le(b),
+                                ComparisonOperator::GreaterThan => a.simd_gt(b),
+                                ComparisonOperator::GreaterThanOrEqualTo => a.simd_ge(b),
+                                _ => Mask::splat(false),
+                            };
+                            let bits = m.to_bitmask();
+                            for l in 0..N {
+                                if ((bits >> l) & 1) == 1 {
+                                    unsafe { output.set_unchecked(i + l, true) };
+                                }
+                            }
+                            i += N;
+                        }
+                        // Tail often caused by `n % LANES != 0`; uses scalar fallback.
+                        for j in i..len {
+                            let res = match op {
+                                ComparisonOperator::Equals => lhs[j] == rhs[j],
+                                ComparisonOperator::NotEquals => lhs[j] != rhs[j],
+                                ComparisonOperator::LessThan => lhs[j] < rhs[j],
+                                ComparisonOperator::LessThanOrEqualTo => lhs[j] <= rhs[j],
+                                ComparisonOperator::GreaterThan => lhs[j] > rhs[j],
+                                ComparisonOperator::GreaterThanOrEqualTo => lhs[j] >= rhs[j],
+                                _ => false,
+                            };
+                            if res {
+                                unsafe { output.set_unchecked(j, true) };
+                            }
+                        }
+
+                        return Ok(());
+                    }
+                }
+                // Fall through to scalar path if alignment check failed
+            }
+
+            // Scalar fallback - alignment check failed
+            for i in 0..len {
+                if has_nulls && !mask.map_or(true, |m| unsafe { m.get_unchecked(i) }) {
+                    continue;
+                }
+                let res = match op {
+                    ComparisonOperator::Equals => lhs[i] == rhs[i],
+                    ComparisonOperator::NotEquals => lhs[i] != rhs[i],
+                    ComparisonOperator::LessThan => lhs[i] < rhs[i],
+                    ComparisonOperator::LessThanOrEqualTo => lhs[i] <= rhs[i],
+                    ComparisonOperator::GreaterThan => lhs[i] > rhs[i],
+                    ComparisonOperator::GreaterThanOrEqualTo => lhs[i] >= rhs[i],
+                    _ => false,
+                };
+                if res {
+                    unsafe { output.set_unchecked(i, true) };
+                }
+            }
+            Ok(())
+        }
+
         /// Type-specific SIMD-accelerated comparison function with vectorised operations.
         ///
         /// Specialised comparison implementation optimised for the specific numeric type with
@@ -90,83 +178,8 @@ macro_rules! impl_cmp_numeric {
             op: ComparisonOperator,
         ) -> Result<BooleanArray<()>, KernelError> {
             let len = lhs.len();
-            confirm_equal_len("compare numeric length mismatch", len, rhs.len())?;
-            let has_nulls = mask.is_some();
             let mut out = new_bool_bitmask(len);
-
-            #[cfg(feature = "simd")]
-            {
-                // Check if both arrays are 64-byte aligned for SIMD
-                if is_simd_aligned(lhs) && is_simd_aligned(rhs) {
-                    use std::simd::cmp::{SimdPartialEq, SimdPartialOrd};
-                    const N: usize = $lanes;
-                    if !has_nulls {
-                        let mut i = 0;
-                        while i + N <= len {
-                            let a = Simd::<$ty, N>::from_slice(&lhs[i..i + N]);
-                            let b = Simd::<$ty, N>::from_slice(&rhs[i..i + N]);
-                            let m: Mask<$mask_elem, N> = match op {
-                                ComparisonOperator::Equals => a.simd_eq(b),
-                                ComparisonOperator::NotEquals => a.simd_ne(b),
-                                ComparisonOperator::LessThan => a.simd_lt(b),
-                                ComparisonOperator::LessThanOrEqualTo => a.simd_le(b),
-                                ComparisonOperator::GreaterThan => a.simd_gt(b),
-                                ComparisonOperator::GreaterThanOrEqualTo => a.simd_ge(b),
-                                _ => Mask::splat(false),
-                            };
-                            let bits = m.to_bitmask();
-                            for l in 0..N {
-                                if ((bits >> l) & 1) == 1 {
-                                    unsafe { out.set_unchecked(i + l, true) };
-                                }
-                            }
-                            i += N;
-                        }
-                        // Tail often caused by `n % LANES != 0`; uses scalar fallback.
-                        for j in i..len {
-                            let res = match op {
-                                ComparisonOperator::Equals => lhs[j] == rhs[j],
-                                ComparisonOperator::NotEquals => lhs[j] != rhs[j],
-                                ComparisonOperator::LessThan => lhs[j] < rhs[j],
-                                ComparisonOperator::LessThanOrEqualTo => lhs[j] <= rhs[j],
-                                ComparisonOperator::GreaterThan => lhs[j] > rhs[j],
-                                ComparisonOperator::GreaterThanOrEqualTo => lhs[j] >= rhs[j],
-                                _ => false,
-                            };
-                            if res {
-                                unsafe { out.set_unchecked(j, true) };
-                            }
-                        }
-
-                        return Ok(BooleanArray {
-                            data: out.into(),
-                            null_mask: None,
-                            len,
-                            _phantom: PhantomData,
-                        });
-                    }
-                }
-                // Fall through to scalar path if alignment check failed
-            }
-
-            // Scalar fallback - alignment check failed
-            for i in 0..len {
-                if has_nulls && !mask.map_or(true, |m| unsafe { m.get_unchecked(i) }) {
-                    continue;
-                }
-                let res = match op {
-                    ComparisonOperator::Equals => lhs[i] == rhs[i],
-                    ComparisonOperator::NotEquals => lhs[i] != rhs[i],
-                    ComparisonOperator::LessThan => lhs[i] < rhs[i],
-                    ComparisonOperator::LessThanOrEqualTo => lhs[i] <= rhs[i],
-                    ComparisonOperator::GreaterThan => lhs[i] > rhs[i],
-                    ComparisonOperator::GreaterThanOrEqualTo => lhs[i] >= rhs[i],
-                    _ => false,
-                };
-                if res {
-                    unsafe { out.set_unchecked(i, true) };
-                }
-            }
+            $fn_name_to(lhs, rhs, mask, op, &mut out)?;
             Ok(BooleanArray {
                 data: out.into(),
                 null_mask: mask.cloned(),
@@ -175,6 +188,41 @@ macro_rules! impl_cmp_numeric {
             })
         }
     };
+}
+
+/// Zero-allocation variant: writes directly to caller's output buffer.
+///
+/// Unified numeric comparison dispatch with optional null mask support.
+/// The output Bitmask must have capacity >= lhs.len().
+#[inline(always)]
+pub fn cmp_numeric_to<T: Numeric + Copy + 'static>(
+    lhs: &[T],
+    rhs: &[T],
+    mask: Option<&Bitmask>,
+    op: ComparisonOperator,
+    output: &mut Bitmask,
+) -> Result<(), KernelError> {
+    macro_rules! dispatch {
+        ($t:ty, $f:ident) => {
+            if std::any::TypeId::of::<T>() == std::any::TypeId::of::<$t>() {
+                return $f(
+                    unsafe { std::mem::transmute(lhs) },
+                    unsafe { std::mem::transmute(rhs) },
+                    mask,
+                    op,
+                    output,
+                );
+            }
+        };
+    }
+    dispatch!(i32, cmp_i32_to);
+    dispatch!(i64, cmp_i64_to);
+    dispatch!(u32, cmp_u32_to);
+    dispatch!(u64, cmp_u64_to);
+    dispatch!(f32, cmp_f32_to);
+    dispatch!(f64, cmp_f64_to);
+
+    unreachable!("Unsupported numeric type for compare_numeric");
 }
 
 /// Unified numeric comparison dispatch with optional null mask support.
@@ -188,7 +236,7 @@ macro_rules! impl_cmp_numeric {
 ///
 /// # Parameters
 /// - `lhs`: Left-hand side numeric slice for comparison
-/// - `rhs`: Right-hand side numeric slice for comparison  
+/// - `rhs`: Right-hand side numeric slice for comparison
 /// - `mask`: Optional validity mask applied after comparison (AND operation)
 /// - `op`: Comparison operator to apply (Equals, NotEquals, LessThan, etc.)
 ///
@@ -198,7 +246,7 @@ macro_rules! impl_cmp_numeric {
 /// # Dispatch Strategy
 /// Uses `TypeId` runtime checking to dispatch to optimal type-specific implementations:
 /// - `i32`/`u32`: 32-bit integer SIMD kernels with W32 lane configuration
-/// - `i64`/`u64`: 64-bit integer SIMD kernels with W64 lane configuration  
+/// - `i64`/`u64`: 64-bit integer SIMD kernels with W64 lane configuration
 /// - `f32`/`f64`: IEEE 754 floating-point SIMD kernels with specialised NaN handling
 ///
 /// # Error Conditions
@@ -226,26 +274,15 @@ pub fn cmp_numeric<T: Numeric + Copy + 'static>(
     mask: Option<&Bitmask>,
     op: ComparisonOperator,
 ) -> Result<BooleanArray<()>, KernelError> {
-    macro_rules! dispatch {
-        ($t:ty, $f:ident) => {
-            if std::any::TypeId::of::<T>() == std::any::TypeId::of::<$t>() {
-                return $f(
-                    unsafe { std::mem::transmute(lhs) },
-                    unsafe { std::mem::transmute(rhs) },
-                    mask,
-                    op,
-                );
-            }
-        };
-    }
-    dispatch!(i32, cmp_i32);
-    dispatch!(i64, cmp_i64);
-    dispatch!(u32, cmp_u32);
-    dispatch!(u64, cmp_u64);
-    dispatch!(f32, cmp_f32);
-    dispatch!(f64, cmp_f64);
-
-    unreachable!("Unsupported numeric type for compare_numeric");
+    let len = lhs.len();
+    let mut out = new_bool_bitmask(len);
+    cmp_numeric_to(lhs, rhs, mask, op, &mut out)?;
+    Ok(BooleanArray {
+        data: out.into(),
+        null_mask: mask.cloned(),
+        len,
+        _phantom: PhantomData,
+    })
 }
 
 /// SIMD-accelerated compare bitmask
@@ -718,12 +755,12 @@ macro_rules! impl_cmp_utf8_slice {
     };
 }
 
-impl_cmp_numeric!(cmp_i32, i32, W32, i32);
-impl_cmp_numeric!(cmp_u32, u32, W32, i32);
-impl_cmp_numeric!(cmp_i64, i64, W64, i64);
-impl_cmp_numeric!(cmp_u64, u64, W64, i64);
-impl_cmp_numeric!(cmp_f32, f32, W32, i32);
-impl_cmp_numeric!(cmp_f64, f64, W64, i64);
+impl_cmp_numeric!(cmp_i32, cmp_i32_to, i32, W32, i32);
+impl_cmp_numeric!(cmp_u32, cmp_u32_to, u32, W32, i32);
+impl_cmp_numeric!(cmp_i64, cmp_i64_to, i64, W64, i64);
+impl_cmp_numeric!(cmp_u64, cmp_u64_to, u64, W64, i64);
+impl_cmp_numeric!(cmp_f32, cmp_f32_to, f32, W32, i32);
+impl_cmp_numeric!(cmp_f64, cmp_f64_to, f64, W64, i64);
 impl_cmp_utf8_slice!(cmp_str_str,   StringAVT<'a, T>,     StringAVT<'a, T>,      [ 'a, T: Integer ]);
 impl_cmp_utf8_slice!(cmp_str_dict,  StringAVT<'a, T>,     CategoricalAVT<'a, U>,      [ 'a, T: Integer, U: Integer ]);
 impl_cmp_utf8_slice!(cmp_dict_str,  CategoricalAVT<'a, T>,     StringAVT<'a, U>,      [ 'a, T: Integer, U: Integer ]);
