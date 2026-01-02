@@ -10,6 +10,75 @@ use minarrow::{Bitmask, FloatArray};
 
 use minarrow::enums::error::KernelError;
 
+/// Discrete uniform PMF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn discrete_uniform_pmf_to(
+    k: &[i64],
+    low: i64,
+    high: i64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::discrete_uniform_pmf_simd_to(k, low, high, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::discrete_uniform_pmf_std_to(k, low, high, output, null_mask, null_count)
+    }
+}
+
+/// Discrete uniform CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn discrete_uniform_cdf_to(
+    k: &[i64],
+    low: i64,
+    high: i64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::discrete_uniform_cdf_simd_to(k, low, high, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::discrete_uniform_cdf_std_to(k, low, high, output, null_mask, null_count)
+    }
+}
+
+/// Discrete uniform quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn discrete_uniform_quantile_to(
+    p: &[f64],
+    low: i64,
+    high: i64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::discrete_uniform_quantile_simd_to(p, low, high, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::discrete_uniform_quantile_std_to(p, low, high, output, null_mask, null_count)
+    }
+}
+
 /// Discrete uniform PMF.
 /// P(X=k) = 1/(high−low+1) for k ∈ [low, high], else 0
 #[inline(always)]

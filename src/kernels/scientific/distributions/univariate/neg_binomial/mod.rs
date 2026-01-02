@@ -34,6 +34,59 @@ use minarrow::{Bitmask, FloatArray};
 
 use minarrow::enums::error::KernelError;
 
+/// Negative Binomial PMF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn neg_binomial_pmf_to(
+    k: &[u64],
+    r: u64,
+    p: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::neg_binomial_pmf_simd_to(k, r, p, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::neg_binomial_pmf_std_to(k, r, p, output, null_mask, null_count)
+    }
+}
+
+/// Negative Binomial CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn neg_binomial_cdf_to(
+    k: &[u64],
+    r: u64,
+    p: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::neg_binomial_cdf_std_to(k, r, p, output, null_mask, null_count)
+}
+
+/// Negative Binomial quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn neg_binomial_quantile_to(
+    q: &[f64],
+    r: u64,
+    p: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::neg_binomial_quantile_std_to(q, r, p, output, null_mask, null_count)
+}
+
 /// Negative Binomial PMF (Pascal distribution, number of failures before r-th success)
 /// PMF: P(X=k) = C(k+r-1, k) * p^r * (1-p)^k, for k=0,1,...
 #[inline(always)]

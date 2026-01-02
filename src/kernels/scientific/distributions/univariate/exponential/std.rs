@@ -1,35 +1,34 @@
 // Copyright Peter Bower 2025. All Rights Reserved.
 // Licensed under Mozilla Public License (MPL) 2.0.
 
-use minarrow::{Bitmask, FloatArray};
+use minarrow::{Bitmask, FloatArray, Vec64};
 
 use crate::kernels::scientific::distributions::univariate::common::std::{
-    dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
+    dense_univariate_kernel_f64_std_to, masked_univariate_kernel_f64_std_to,
 };
 use crate::utils::has_nulls;
 use minarrow::enums::error::KernelError;
 
-/// Exponential PDF: f(x|λ) = λ·exp(-λ·x) for x ≥ 0, 0 otherwise.
-/// Returns error if λ ≤ 0 or non-finite.
+/// Exponential PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
 #[inline(always)]
-pub fn exponential_pdf_std(
+pub fn exponential_pdf_std_to(
     x: &[f64],
     lambda: f64,
+    output: &mut [f64],
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Result<FloatArray<f64>, KernelError> {
-    // 1) parameter checks
+) -> Result<(), KernelError> {
     if lambda <= 0.0 || !lambda.is_finite() {
         return Err(KernelError::InvalidArguments(
             "exponential_pdf: λ must be positive and finite".into(),
         ));
     }
-    let len = x.len();
-    if len == 0 {
-        return Ok(FloatArray::from_slice(&[]));
+    if x.is_empty() {
+        return Ok(());
     }
 
-    // scalar fallback body
     let scalar_body = move |xi: f64| {
         if xi.is_nan() {
             f64::NAN
@@ -40,44 +39,57 @@ pub fn exponential_pdf_std(
         }
     };
 
-    // 2) Dense (no nulls) path
     if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        return Ok(());
     }
 
-    // 3) Null‐aware path
     let mask_ref = null_mask.expect("exponential_pdf: null_count > 0 requires null_mask");
-
-    let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
+    Ok(())
 }
 
-/// Exponential CDF: F(x|λ) = 1 – exp(–λ·x) for x ≥ 0, 0 otherwise.
-/// Error if λ ≤ 0 or non‐finite.
+/// Exponential PDF: f(x|λ) = λ·exp(-λ·x) for x ≥ 0, 0 otherwise.
+/// Returns error if λ ≤ 0 or non-finite.
 #[inline(always)]
-pub fn exponential_cdf_std(
+pub fn exponential_pdf_std(
     x: &[f64],
     lambda: f64,
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // 1) parameter checks
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    exponential_pdf_std_to(x, lambda, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Exponential CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn exponential_cdf_std_to(
+    x: &[f64],
+    lambda: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     if lambda <= 0.0 || !lambda.is_finite() {
         return Err(KernelError::InvalidArguments(
             "exponential_cdf: λ must be positive and finite".into(),
         ));
     }
-    let len = x.len();
-    if len == 0 {
-        return Ok(FloatArray::from_slice(&[]));
+    if x.is_empty() {
+        return Ok(());
     }
 
     let scalar_body = move |xi: f64| {
@@ -90,23 +102,70 @@ pub fn exponential_cdf_std(
         }
     };
 
-    // 2) Dense (no nulls) path
     if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        return Ok(());
     }
 
-    // 3) Null‐aware masked path
     let mask_ref = null_mask.expect("exponential_cdf: null_count > 0 requires null_mask");
-    let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
+    Ok(())
+}
+
+/// Exponential CDF: F(x|λ) = 1 – exp(–λ·x) for x ≥ 0, 0 otherwise.
+/// Error if λ ≤ 0 or non‐finite.
+#[inline(always)]
+pub fn exponential_cdf_std(
+    x: &[f64],
+    lambda: f64,
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<FloatArray<f64>, KernelError> {
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    exponential_cdf_std_to(x, lambda, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Exponential quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn exponential_quantile_std_to(
+    p: &[f64],
+    lambda: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    if lambda <= 0.0 || !lambda.is_finite() {
+        return Err(KernelError::InvalidArguments(
+            "exponential_quantile: λ must be positive and finite".into(),
+        ));
+    }
+    if p.is_empty() {
+        return Ok(());
+    }
+
+    let scalar_body = |pi: f64| -((1.0 - pi).ln()) / lambda;
+
+    if !has_nulls(null_count, null_mask) {
+        dense_univariate_kernel_f64_std_to(p, output, scalar_body);
+        return Ok(());
+    }
+
+    let mask_ref = null_mask.expect("exponential_quantile: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(p, mask_ref, output, &mut out_mask, scalar_body);
+    Ok(())
 }
 
 /// Exponential quantile (inverse CDF): Q(p|λ) = –ln(1–p)/λ, pure math
@@ -117,34 +176,15 @@ pub fn exponential_quantile_std(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // 1) parameter checks
-    if lambda <= 0.0 || !lambda.is_finite() {
-        return Err(KernelError::InvalidArguments(
-            "exponential_quantile: λ must be positive and finite".into(),
-        ));
-    }
-    // 2) empty
-    if p.is_empty() {
+    let len = p.len();
+    if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    let scalar_body = |pi: f64| -((1.0 - pi).ln()) / lambda;
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    // 3) dense path
-    if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask_out) = dense_univariate_kernel_f64_std(p, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask_out,
-        });
-    }
+    exponential_quantile_std_to(p, lambda, out.as_mut_slice(), null_mask, null_count)?;
 
-    // 4) null-aware path
-    let mask_ref = null_mask.expect("exponential_quantile: null_count > 0 requires null_mask");
-    let (data, out_mask) = masked_univariate_kernel_f64_std(p, mask_ref, scalar_body);
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

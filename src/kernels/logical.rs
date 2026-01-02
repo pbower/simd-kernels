@@ -53,16 +53,19 @@ fn new_bool_buffer(len: usize) -> Bitmask {
 // Between
 
 macro_rules! impl_between_numeric {
-    ($name:ident, $ty:ty, $mask_elem:ty, $lanes:expr) => {
-        /// Test if LHS values fall between RHS min/max bounds, producing boolean result array.
+    ($name:ident, $name_to:ident, $ty:ty, $mask_elem:ty, $lanes:expr) => {
+        /// Zero-allocation variant: writes directly to caller's output buffer.
+        ///
+        /// Test if LHS values fall between RHS min/max bounds.
+        /// The output Bitmask must have capacity >= lhs.len().
         #[inline(always)]
-        pub fn $name(
+        pub fn $name_to(
             lhs: &[$ty],
             rhs: &[$ty],
-            mask: Option<&Bitmask>, // lhs validity mask
-            has_nulls: bool
-        ) -> Result<BooleanArray<()>, KernelError> {
-
+            mask: Option<&Bitmask>,
+            has_nulls: bool,
+            output: &mut Bitmask,
+        ) -> Result<(), KernelError> {
             let len = lhs.len();
             if rhs.len() != 2 && rhs.len() != 2 * len {
                 return Err(KernelError::InvalidArguments(
@@ -77,7 +80,7 @@ macro_rules! impl_between_numeric {
                     ));
                 }
             }
-            let mut out_data = new_bool_buffer(len);
+            assert!(output.capacity() >= len, concat!(stringify!($name_to), ": output capacity too small"));
 
             // SIMD fast-path
             #[cfg(feature = "simd")]
@@ -100,7 +103,7 @@ macro_rules! impl_between_numeric {
 
                             for l in 0..N {
                                 if ((bm >> l) & 1) == 1 {
-                                    out_data.set(i + l, true);
+                                    output.set(i + l, true);
                                 }
                             }
                             i += N;
@@ -108,16 +111,11 @@ macro_rules! impl_between_numeric {
                         // fall back to scalar for tail
                         for j in i..len {
                             if lhs[j] >= rhs[0] && lhs[j] <= rhs[1] {
-                                out_data.set(j, true);
+                                output.set(j, true);
                             }
                         }
 
-                        return Ok(BooleanArray {
-                            data: out_data.into(),
-                            null_mask: mask.cloned(),
-                            len,
-                            _phantom: PhantomData
-                        });
+                        return Ok(());
                     }
                 }
                 // Fall through to scalar path if alignment check failed
@@ -131,7 +129,7 @@ macro_rules! impl_between_numeric {
                         && lhs[i] >= min
                         && lhs[i] <= max
                     {
-                        out_data.set(i, true);
+                        output.set(i, true);
                     }
                 }
             } else {
@@ -143,11 +141,25 @@ macro_rules! impl_between_numeric {
                         && lhs[i] >= min
                         && lhs[i] <= max
                     {
-                        out_data.set(i, true);
+                        output.set(i, true);
                     }
                 }
             }
 
+            Ok(())
+        }
+
+        /// Test if LHS values fall between RHS min/max bounds, producing boolean result array.
+        #[inline(always)]
+        pub fn $name(
+            lhs: &[$ty],
+            rhs: &[$ty],
+            mask: Option<&Bitmask>,
+            has_nulls: bool
+        ) -> Result<BooleanArray<()>, KernelError> {
+            let len = lhs.len();
+            let mut out_data = new_bool_buffer(len);
+            $name_to(lhs, rhs, mask, has_nulls, &mut out_data)?;
             Ok(BooleanArray {
                 data: out_data.into(),
                 null_mask: mask.cloned(),
@@ -204,18 +216,25 @@ fn between_generic<T: Numeric + Copy + std::cmp::PartialOrd>(
 // In and Not In
 
 macro_rules! impl_in_int {
-    ($name:ident, $ty:ty, $lanes:expr, $mask_elem:ty) => {
-        /// Test membership of LHS integer values in RHS set, producing boolean result array.
+    ($name:ident, $name_to:ident, $ty:ty, $lanes:expr, $mask_elem:ty) => {
+        /// Zero-allocation variant: writes directly to caller's output buffer.
+        ///
+        /// Test membership of LHS integer values in RHS set.
+        /// The output Bitmask must have capacity >= lhs.len().
         #[inline(always)]
-        pub fn $name(
+        pub fn $name_to(
             lhs: &[$ty],
             rhs: &[$ty],
             mask: Option<&Bitmask>,
             has_nulls: bool,
-        ) -> Result<BooleanArray<()>, KernelError> {
+            output: &mut Bitmask,
+        ) -> Result<(), KernelError> {
             let len = lhs.len();
-            let mut out = new_bool_buffer(len);
             let _ = confirm_mask_capacity(len, mask)?;
+            assert!(
+                output.capacity() >= len,
+                concat!(stringify!($name_to), ": output capacity too small")
+            );
 
             #[cfg(feature = "simd")]
             {
@@ -237,22 +256,17 @@ macro_rules! impl_in_int {
                                 let bm = m.to_bitmask();
                                 for l in 0..$lanes {
                                     if ((bm >> l) & 1) == 1 {
-                                        out.set(i + l, true);
+                                        output.set(i + l, true);
                                     }
                                 }
                                 i += $lanes;
                             }
                             for j in i..len {
                                 if rhs_simd.contains(&lhs[j]) {
-                                    out.set(j, true);
+                                    output.set(j, true);
                                 }
                             }
-                            return Ok(BooleanArray {
-                                data: out.into(),
-                                null_mask: mask.cloned(),
-                                len,
-                                _phantom: PhantomData,
-                            });
+                            return Ok(());
                         } else {
                             // ---- SIMD + nulls: use bitmask_to_simd_mask
                             let mb = mask.expect("Bitmask must be Some if has_nulls is set");
@@ -271,22 +285,17 @@ macro_rules! impl_in_int {
                                 let bm = valid_in.to_bitmask();
                                 for l in 0..$lanes {
                                     if ((bm >> l) & 1) == 1 {
-                                        out.set(i + l, true);
+                                        output.set(i + l, true);
                                     }
                                 }
                                 i += $lanes;
                             }
                             for j in i..len {
                                 if unsafe { mb.get_unchecked(j) } && rhs_simd.contains(&lhs[j]) {
-                                    out.set(j, true);
+                                    output.set(j, true);
                                 }
                             }
-                            return Ok(BooleanArray {
-                                data: out.into(),
-                                null_mask: mask.cloned(),
-                                len,
-                                _phantom: PhantomData,
-                            });
+                            return Ok(());
                         }
                     }
                 }
@@ -299,9 +308,23 @@ macro_rules! impl_in_int {
                 if (!has_nulls || mask.map_or(true, |m| unsafe { m.get_unchecked(i) }))
                     && set.contains(&lhs[i])
                 {
-                    out.set(i, true);
+                    output.set(i, true);
                 }
             }
+            Ok(())
+        }
+
+        /// Test membership of LHS integer values in RHS set, producing boolean result array.
+        #[inline(always)]
+        pub fn $name(
+            lhs: &[$ty],
+            rhs: &[$ty],
+            mask: Option<&Bitmask>,
+            has_nulls: bool,
+        ) -> Result<BooleanArray<()>, KernelError> {
+            let len = lhs.len();
+            let mut out = new_bool_buffer(len);
+            $name_to(lhs, rhs, mask, has_nulls, &mut out)?;
             Ok(BooleanArray {
                 data: out.into(),
                 null_mask: mask.cloned(),
@@ -315,19 +338,26 @@ macro_rules! impl_in_int {
 /// Implements SIMD/Scalar IN kernel for floats, handling NaN semantics and optional null mask.
 macro_rules! impl_in_float {
     (
-        $fn_name:ident, $ty:ty, $lanes:expr, $mask_elem:ty
+        $fn_name:ident, $fn_name_to:ident, $ty:ty, $lanes:expr, $mask_elem:ty
     ) => {
+        /// Zero-allocation variant: writes directly to caller's output buffer.
+        ///
         /// Test membership of LHS floating-point values in RHS set with NaN handling.
+        /// The output Bitmask must have capacity >= lhs.len().
         #[inline(always)]
-        pub fn $fn_name(
+        pub fn $fn_name_to(
             lhs: &[$ty],
             rhs: &[$ty],
             mask: Option<&Bitmask>,
             has_nulls: bool,
-        ) -> Result<BooleanArray<()>, KernelError> {
+            output: &mut Bitmask,
+        ) -> Result<(), KernelError> {
             let len = lhs.len();
-            let mut out = new_bool_buffer(len);
             let _ = confirm_mask_capacity(len, mask)?;
+            assert!(
+                output.capacity() >= len,
+                concat!(stringify!($fn_name_to), ": output capacity too small")
+            );
 
             #[cfg(feature = "simd")]
             {
@@ -349,7 +379,7 @@ macro_rules! impl_in_float {
                                 let bm = m.to_bitmask();
                                 for l in 0..$lanes {
                                     if ((bm >> l) & 1) == 1 {
-                                        out.set(i + l, true);
+                                        output.set(i + l, true);
                                     }
                                 }
                                 i += $lanes;
@@ -357,15 +387,10 @@ macro_rules! impl_in_float {
                             for j in i..len {
                                 let x = lhs[j];
                                 if rhs.iter().any(|&v| x == v || (x.is_nan() && v.is_nan())) {
-                                    out.set(j, true);
+                                    output.set(j, true);
                                 }
                             }
-                            return Ok(BooleanArray {
-                                data: out.into(),
-                                null_mask: mask.cloned(),
-                                len,
-                                _phantom: PhantomData,
-                            });
+                            return Ok(());
                         } else {
                             let mb = mask.expect("Bitmask must be Some if nulls are present");
                             let mask_bytes = mb.as_bytes();
@@ -383,7 +408,7 @@ macro_rules! impl_in_float {
                                 let bm = m.to_bitmask();
                                 for l in 0..$lanes {
                                     if ((bm >> l) & 1) == 1 {
-                                        out.set(i + l, true);
+                                        output.set(i + l, true);
                                     }
                                 }
                                 i += $lanes;
@@ -392,16 +417,11 @@ macro_rules! impl_in_float {
                                 if mask.map_or(true, |m| unsafe { m.get_unchecked(j) }) {
                                     let x = lhs[j];
                                     if rhs.iter().any(|&v| x == v || (x.is_nan() && v.is_nan())) {
-                                        out.set(j, true);
+                                        output.set(j, true);
                                     }
                                 }
                             }
-                            return Ok(BooleanArray {
-                                data: out.into(),
-                                null_mask: mask.cloned(),
-                                len,
-                                _phantom: PhantomData,
-                            });
+                            return Ok(());
                         }
                     }
                 }
@@ -415,9 +435,23 @@ macro_rules! impl_in_float {
                 }
                 let x = lhs[i];
                 if rhs.iter().any(|&v| x == v || (x.is_nan() && v.is_nan())) {
-                    out.set(i, true);
+                    output.set(i, true);
                 }
             }
+            Ok(())
+        }
+
+        /// Test membership of LHS floating-point values in RHS set with NaN handling.
+        #[inline(always)]
+        pub fn $fn_name(
+            lhs: &[$ty],
+            rhs: &[$ty],
+            mask: Option<&Bitmask>,
+            has_nulls: bool,
+        ) -> Result<BooleanArray<()>, KernelError> {
+            let len = lhs.len();
+            let mut out = new_bool_buffer(len);
+            $fn_name_to(lhs, rhs, mask, has_nulls, &mut out)?;
             Ok(BooleanArray {
                 data: out.into(),
                 null_mask: mask.cloned(),
@@ -430,35 +464,35 @@ macro_rules! impl_in_float {
 
 // Correct MaskElement types per std::simd
 #[cfg(feature = "extended_numeric_types")]
-impl_in_int!(in_i8, i8, W8, i8);
+impl_in_int!(in_i8, in_i8_to, i8, W8, i8);
 #[cfg(feature = "extended_numeric_types")]
-impl_in_int!(in_u8, u8, W8, i8);
+impl_in_int!(in_u8, in_u8_to, u8, W8, i8);
 #[cfg(feature = "extended_numeric_types")]
-impl_in_int!(in_i16, i16, W16, i16);
+impl_in_int!(in_i16, in_i16_to, i16, W16, i16);
 #[cfg(feature = "extended_numeric_types")]
-impl_in_int!(in_u16, u16, W16, i16);
-impl_in_int!(in_i32, i32, W32, i32);
-impl_in_int!(in_u32, u32, W32, i32);
-impl_in_int!(in_i64, i64, W64, i64);
-impl_in_int!(in_u64, u64, W64, i64);
-impl_in_float!(in_f32, f32, W32, i32);
-impl_in_float!(in_f64, f64, W64, i64);
+impl_in_int!(in_u16, in_u16_to, u16, W16, i16);
+impl_in_int!(in_i32, in_i32_to, i32, W32, i32);
+impl_in_int!(in_u32, in_u32_to, u32, W32, i32);
+impl_in_int!(in_i64, in_i64_to, i64, W64, i64);
+impl_in_int!(in_u64, in_u64_to, u64, W64, i64);
+impl_in_float!(in_f32, in_f32_to, f32, W32, i32);
+impl_in_float!(in_f64, in_f64_to, f64, W64, i64);
 
 #[cfg(feature = "extended_numeric_types")]
-impl_between_numeric!(between_i8, i8, i8, W8);
+impl_between_numeric!(between_i8, between_i8_to, i8, i8, W8);
 #[cfg(feature = "extended_numeric_types")]
-impl_between_numeric!(between_u8, u8, i8, W8);
+impl_between_numeric!(between_u8, between_u8_to, u8, i8, W8);
 #[cfg(feature = "extended_numeric_types")]
-impl_between_numeric!(between_i16, i16, i16, W16);
+impl_between_numeric!(between_i16, between_i16_to, i16, i16, W16);
 #[cfg(feature = "extended_numeric_types")]
-impl_between_numeric!(between_u16, u16, i16, W16);
+impl_between_numeric!(between_u16, between_u16_to, u16, i16, W16);
 
-impl_between_numeric!(between_i32, i32, i32, W32);
-impl_between_numeric!(between_u32, u32, i32, W32);
-impl_between_numeric!(between_i64, i64, i64, W64);
-impl_between_numeric!(between_u64, u64, i64, W64);
-impl_between_numeric!(between_f32, f32, i32, W32);
-impl_between_numeric!(between_f64, f64, i64, W64);
+impl_between_numeric!(between_i32, between_i32_to, i32, i32, W32);
+impl_between_numeric!(between_u32, between_u32_to, u32, i32, W32);
+impl_between_numeric!(between_i64, between_i64_to, i64, i64, W64);
+impl_between_numeric!(between_u64, between_u64_to, u64, i64, W64);
+impl_between_numeric!(between_f32, between_f32_to, f32, i32, W32);
+impl_between_numeric!(between_f64, between_f64_to, f64, i64, W64);
 
 // String and dictionary
 

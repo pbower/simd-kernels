@@ -12,36 +12,36 @@
 //! when SIMD is unavailable.
 
 use minarrow::enums::error::KernelError;
-use minarrow::{Bitmask, FloatArray, vec64};
+use minarrow::{Bitmask, FloatArray, Vec64, vec64};
 
 use crate::kernels::scientific::distributions::shared::scalar::*;
 use crate::{
     kernels::scientific::distributions::univariate::common::std::{
-        dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
+        dense_univariate_kernel_f64_std_to, masked_univariate_kernel_f64_std_to,
     },
     utils::has_nulls,
 };
 
-/// Scalar implementation of binomial distribution probability mass function.
+/// Binomial PMF (zero-allocation variant).
 ///
-/// Computes the PMF using logarithmic computation for numerical stability:
-/// log(PMF) = log_gamma(n+1) - log_gamma(k+1) - log_gamma(n-k+1) + k×log(p) + (n-k)×log(1-p)
+/// Writes directly to caller-provided output buffer.
 #[cfg(not(feature = "simd"))]
 #[inline(always)]
-pub fn binomial_pmf_std(
+pub fn binomial_pmf_std_to(
     k: &[u64],
     n: u64,
     p: f64,
+    output: &mut [f64],
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Result<FloatArray<f64>, KernelError> {
+) -> Result<(), KernelError> {
     if !(0.0 <= p && p <= 1.0) || !p.is_finite() {
         return Err(KernelError::InvalidArguments(
             "binomial_pmf: invalid p".into(),
         ));
     }
     if k.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     let ln_choose_n = ln_gamma((n as f64) + 1.0);
@@ -58,51 +58,62 @@ pub fn binomial_pmf_std(
         }
     };
 
-    // Dense fast path
-    if !has_nulls(null_count, null_mask) {
-        let k_f64: Vec<f64> = k.iter().map(|&ki| ki as f64).collect();
-
-        let (out, out_mask) =
-            dense_univariate_kernel_f64_std(&k_f64, null_mask.is_some(), scalar_body);
-
-        return Ok(FloatArray {
-            data: out.into(),
-            null_mask: out_mask,
-        });
-    }
-
-    // Null-aware masked path
-    let mask = null_mask.expect("null_count > 0 requires null_mask");
     let k_f64: Vec<f64> = k.iter().map(|&ki| ki as f64).collect();
 
-    let (out, out_mask) = masked_univariate_kernel_f64_std(&k_f64, mask, scalar_body);
+    if !has_nulls(null_count, null_mask) {
+        dense_univariate_kernel_f64_std_to(&k_f64, output, scalar_body);
+        return Ok(());
+    }
 
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(out_mask),
-    })
+    let mask = null_mask.expect("null_count > 0 requires null_mask");
+    let mut out_mask = mask.clone();
+    masked_univariate_kernel_f64_std_to(&k_f64, mask, output, &mut out_mask, scalar_body);
+    Ok(())
 }
 
-/// Scalar implementation of binomial distribution cumulative distribution function.
-///
-/// Computes the CDF using the relationship with the regularised incomplete beta function:
-/// P(X ≤ k) = I₁₋ₚ(n-k, k+1) where I is the regularised incomplete beta function.
+/// Scalar implementation of binomial distribution probability mass function.
 #[cfg(not(feature = "simd"))]
 #[inline(always)]
-pub fn binomial_cdf_std(
+pub fn binomial_pmf_std(
     k: &[u64],
     n: u64,
     p: f64,
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
+    let len = k.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    binomial_pmf_std_to(k, n, p, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Binomial CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[cfg(not(feature = "simd"))]
+#[inline(always)]
+pub fn binomial_cdf_std_to(
+    k: &[u64],
+    n: u64,
+    p: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     if !(p >= 0.0 && p <= 1.0) || n > 1_000_000_000 {
         return Err(KernelError::InvalidArguments(
             "binomial_cdf: invalid p or n".into(),
         ));
     }
     if k.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     let n_f = n as f64;
@@ -120,60 +131,71 @@ pub fn binomial_cdf_std(
         }
     };
 
-    // Dense fast path
-    if !has_nulls(null_count, null_mask) {
-        let k_f64: Vec<f64> = k.iter().map(|&ki| ki as f64).collect();
-
-        let (out, out_mask) =
-            dense_univariate_kernel_f64_std(&k_f64, null_mask.is_some(), scalar_body);
-
-        return Ok(FloatArray {
-            data: out.into(),
-            null_mask: out_mask,
-        });
-    }
-
-    // Null-aware masked path using masked_univariate_kernel
-    let mask = null_mask.expect("null_count > 0 requires null_mask");
     let k_f64: Vec<f64> = k.iter().map(|&ki| ki as f64).collect();
 
-    let (out, out_mask) = masked_univariate_kernel_f64_std(&k_f64, mask, scalar_body);
+    if !has_nulls(null_count, null_mask) {
+        dense_univariate_kernel_f64_std_to(&k_f64, output, scalar_body);
+        return Ok(());
+    }
 
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(out_mask),
-    })
+    let mask = null_mask.expect("null_count > 0 requires null_mask");
+    let mut out_mask = mask.clone();
+    masked_univariate_kernel_f64_std_to(&k_f64, mask, output, &mut out_mask, scalar_body);
+    Ok(())
 }
 
-/// Scalar implementation of binomial distribution quantile function (inverse CDF).
-///
-/// Computes the quantile function using a dual-strategy approach optimised for
-/// different parameter ranges to balance accuracy and computational efficiency.
+/// Scalar implementation of binomial distribution cumulative distribution function.
+#[cfg(not(feature = "simd"))]
 #[inline(always)]
-pub fn binomial_quantile_std(
-    p: &[f64],
+pub fn binomial_cdf_std(
+    k: &[u64],
     n: u64,
-    p_: f64,
+    p: f64,
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // Arg checks
+    let len = k.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    binomial_cdf_std_to(k, n, p, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Binomial quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn binomial_quantile_std_to(
+    p: &[f64],
+    n: u64,
+    p_: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     if !(0.0 < p_ && p_ < 1.0) || !p_.is_finite() {
         return Err(KernelError::InvalidArguments(
             "binomial_quantile: invalid p_".into(),
         ));
     }
     if n == 0 {
-        return Ok(FloatArray::from_vec64(vec64![0.0; p.len()], None));
+        for i in 0..p.len() {
+            output[i] = 0.0;
+        }
+        return Ok(());
     }
     if p.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
-    // Small-n pre-computed CDF
     let small_n = n <= 100;
     let small_cdf: Option<Vec<f64>> = if small_n {
-        // pre-compute cumulative probabilities C(0..n)
         let mut cdf = vec![0.0; (n + 1) as usize];
         let mut prob = (1.0 - p_).powf(n as f64);
         cdf[0] = prob;
@@ -186,7 +208,6 @@ pub fn binomial_quantile_std(
         None
     };
 
-    // Scalar evaluator
     let scalar_body = |pi: f64| -> f64 {
         if !(pi >= 0.0 && pi <= 1.0) || !pi.is_finite() {
             return f64::NAN;
@@ -210,20 +231,37 @@ pub fn binomial_quantile_std(
     };
 
     if !has_nulls(null_count, null_mask) {
-        // dense path (no nulls)
-        let (out, out_mask) = dense_univariate_kernel_f64_std(p, null_mask.is_some(), scalar_body);
-        return Ok(FloatArray {
-            data: out.into(),
-            null_mask: out_mask,
-        });
+        dense_univariate_kernel_f64_std_to(p, output, scalar_body);
+        return Ok(());
     }
 
-    // Null-aware masked path
     let mask = null_mask.expect("null_count > 0 requires null_mask");
-    let (out, out_mask) = masked_univariate_kernel_f64_std(p, mask, scalar_body);
+    let mut out_mask = mask.clone();
+    masked_univariate_kernel_f64_std_to(p, mask, output, &mut out_mask, scalar_body);
+    Ok(())
+}
 
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(out_mask),
-    })
+/// Scalar implementation of binomial distribution quantile function (inverse CDF).
+#[inline(always)]
+pub fn binomial_quantile_std(
+    p: &[f64],
+    n: u64,
+    p_: f64,
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<FloatArray<f64>, KernelError> {
+    let len = p.len();
+    if n == 0 {
+        return Ok(FloatArray::from_vec64(vec64![0.0; len], None));
+    }
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    binomial_quantile_std_to(p, n, p_, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

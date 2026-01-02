@@ -50,16 +50,24 @@ fn prealloc_vec<T: Copy>(len: usize) -> Vec64<T> {
 
 // Numeric Int float
 macro_rules! impl_conditional_copy_numeric {
-    ($fn_name:ident, $ty:ty, $mask_elem:ty, $lanes:expr, $array_ty:ident) => {
+    ($fn_name:ident, $fn_name_to:ident, $ty:ty, $mask_elem:ty, $lanes:expr, $array_ty:ident) => {
+        /// Zero-allocation variant: writes directly to caller's output buffer.
+        ///
         /// Conditional copy operation: select elements from `then_data` or `else_data` based on boolean mask.
+        /// Panics if output.len() != mask.len.
         #[inline(always)]
-        pub fn $fn_name(
+        pub fn $fn_name_to(
             mask: &BooleanArray<()>,
             then_data: &[$ty],
             else_data: &[$ty],
-        ) -> $array_ty<$ty> {
+            output: &mut [$ty],
+        ) {
             let len = mask.len;
-            let mut data = prealloc_vec::<$ty>(len);
+            assert_eq!(
+                len,
+                output.len(),
+                concat!(stringify!($fn_name_to), ": output length mismatch")
+            );
             let mask_data = &mask.data;
 
             #[cfg(feature = "simd")]
@@ -76,34 +84,42 @@ macro_rules! impl_conditional_copy_numeric {
                         let cond = Mask::<$mask_elem, N>::from_array(bits);
                         let t = Simd::<$ty, N>::from_slice(&then_data[i..i + N]);
                         let e = Simd::<$ty, N>::from_slice(&else_data[i..i + N]);
-                        cond.select(t, e).copy_to_slice(&mut data[i..i + N]);
+                        cond.select(t, e).copy_to_slice(&mut output[i..i + N]);
                         i += N;
                     }
                     // Tail often caused by `n % LANES != 0`; uses scalar fallback.
                     for j in i..len {
-                        data[j] = if unsafe { mask_data.get_unchecked(j) } {
+                        output[j] = if unsafe { mask_data.get_unchecked(j) } {
                             then_data[j]
                         } else {
                             else_data[j]
                         };
                     }
-                    return $array_ty {
-                        data: data.into(),
-                        null_mask: mask.null_mask.clone(),
-                    };
+                    return;
                 }
                 // Fall through to scalar path if alignment check failed
             }
 
             // Scalar fallback - alignment check failed
             for i in 0..len {
-                data[i] = if unsafe { mask_data.get_unchecked(i) } {
+                output[i] = if unsafe { mask_data.get_unchecked(i) } {
                     then_data[i]
                 } else {
                     else_data[i]
                 };
             }
+        }
 
+        /// Conditional copy operation: select elements from `then_data` or `else_data` based on boolean mask.
+        #[inline(always)]
+        pub fn $fn_name(
+            mask: &BooleanArray<()>,
+            then_data: &[$ty],
+            else_data: &[$ty],
+        ) -> $array_ty<$ty> {
+            let len = mask.len;
+            let mut data = prealloc_vec::<$ty>(len);
+            $fn_name_to(mask, then_data, else_data, &mut data);
             $array_ty {
                 data: data.into(),
                 null_mask: mask.null_mask.clone(),
@@ -115,16 +131,23 @@ macro_rules! impl_conditional_copy_numeric {
 // Conditional datetime
 #[cfg(feature = "datetime")]
 macro_rules! impl_conditional_copy_datetime {
-    ($fn_name:ident, $ty:ty, $mask_elem:ty, $lanes:expr) => {
+    ($fn_name:ident, $fn_name_to:ident, $ty:ty, $mask_elem:ty, $lanes:expr) => {
+        /// Zero-allocation variant: writes directly to caller's output buffer.
+        ///
+        /// Panics if output.len() != mask.len.
         #[inline(always)]
-        pub fn $fn_name(
+        pub fn $fn_name_to(
             mask: &BooleanArray<()>,
             then_data: &[$ty],
             else_data: &[$ty],
-            time_unit: TimeUnit,
-        ) -> DatetimeArray<$ty> {
+            output: &mut [$ty],
+        ) {
             let len = mask.len;
-            let mut data = prealloc_vec::<$ty>(len);
+            assert_eq!(
+                len,
+                output.len(),
+                concat!(stringify!($fn_name_to), ": output length mismatch")
+            );
             let mask_data = &mask.data;
 
             #[cfg(feature = "simd")]
@@ -143,29 +166,25 @@ macro_rules! impl_conditional_copy_datetime {
                         let cond = Mask::<$mask_elem, N>::from_array(bits);
                         let t = Simd::<$ty, N>::from_slice(&then_data[i..i + N]);
                         let e = Simd::<$ty, N>::from_slice(&else_data[i..i + N]);
-                        cond.select(t, e).copy_to_slice(&mut data[i..i + N]);
+                        cond.select(t, e).copy_to_slice(&mut output[i..i + N]);
                         i += N;
                     }
                     // Scalar tail
                     for j in i..len {
-                        data[j] = if unsafe { mask_data.get_unchecked(j) } {
+                        output[j] = if unsafe { mask_data.get_unchecked(j) } {
                             then_data[j]
                         } else {
                             else_data[j]
                         };
                     }
-                    return DatetimeArray {
-                        data: data.into(),
-                        null_mask: mask.null_mask.clone(),
-                        time_unit,
-                    };
+                    return;
                 }
                 // Fall through to scalar path if alignment check failed
             }
 
             // Scalar fallback - alignment check failed
             for i in 0..len {
-                data[i] = unsafe {
+                output[i] = unsafe {
                     if mask_data.get_unchecked(i) {
                         then_data[i]
                     } else {
@@ -173,7 +192,18 @@ macro_rules! impl_conditional_copy_datetime {
                     }
                 };
             }
+        }
 
+        #[inline(always)]
+        pub fn $fn_name(
+            mask: &BooleanArray<()>,
+            then_data: &[$ty],
+            else_data: &[$ty],
+            time_unit: TimeUnit,
+        ) -> DatetimeArray<$ty> {
+            let len = mask.len;
+            let mut data = prealloc_vec::<$ty>(len);
+            $fn_name_to(mask, then_data, else_data, &mut data);
             DatetimeArray {
                 data: data.into(),
                 null_mask: mask.null_mask.clone(),
@@ -184,24 +214,142 @@ macro_rules! impl_conditional_copy_datetime {
 }
 
 #[cfg(feature = "extended_numeric_types")]
-impl_conditional_copy_numeric!(conditional_copy_i8, i8, i8, W8, IntegerArray);
+impl_conditional_copy_numeric!(
+    conditional_copy_i8,
+    conditional_copy_i8_to,
+    i8,
+    i8,
+    W8,
+    IntegerArray
+);
 #[cfg(feature = "extended_numeric_types")]
-impl_conditional_copy_numeric!(conditional_copy_u8, u8, i8, W8, IntegerArray);
+impl_conditional_copy_numeric!(
+    conditional_copy_u8,
+    conditional_copy_u8_to,
+    u8,
+    i8,
+    W8,
+    IntegerArray
+);
 #[cfg(feature = "extended_numeric_types")]
-impl_conditional_copy_numeric!(conditional_copy_i16, i16, i16, W16, IntegerArray);
+impl_conditional_copy_numeric!(
+    conditional_copy_i16,
+    conditional_copy_i16_to,
+    i16,
+    i16,
+    W16,
+    IntegerArray
+);
 #[cfg(feature = "extended_numeric_types")]
-impl_conditional_copy_numeric!(conditional_copy_u16, u16, i16, W16, IntegerArray);
-impl_conditional_copy_numeric!(conditional_copy_i32, i32, i32, W32, IntegerArray);
-impl_conditional_copy_numeric!(conditional_copy_u32, u32, i32, W32, IntegerArray);
-impl_conditional_copy_numeric!(conditional_copy_i64, i64, i64, W64, IntegerArray);
-impl_conditional_copy_numeric!(conditional_copy_u64, u64, i64, W64, IntegerArray);
-impl_conditional_copy_numeric!(conditional_copy_f32, f32, i32, W32, FloatArray);
-impl_conditional_copy_numeric!(conditional_copy_f64, f64, i64, W64, FloatArray);
+impl_conditional_copy_numeric!(
+    conditional_copy_u16,
+    conditional_copy_u16_to,
+    u16,
+    i16,
+    W16,
+    IntegerArray
+);
+impl_conditional_copy_numeric!(
+    conditional_copy_i32,
+    conditional_copy_i32_to,
+    i32,
+    i32,
+    W32,
+    IntegerArray
+);
+impl_conditional_copy_numeric!(
+    conditional_copy_u32,
+    conditional_copy_u32_to,
+    u32,
+    i32,
+    W32,
+    IntegerArray
+);
+impl_conditional_copy_numeric!(
+    conditional_copy_i64,
+    conditional_copy_i64_to,
+    i64,
+    i64,
+    W64,
+    IntegerArray
+);
+impl_conditional_copy_numeric!(
+    conditional_copy_u64,
+    conditional_copy_u64_to,
+    u64,
+    i64,
+    W64,
+    IntegerArray
+);
+impl_conditional_copy_numeric!(
+    conditional_copy_f32,
+    conditional_copy_f32_to,
+    f32,
+    i32,
+    W32,
+    FloatArray
+);
+impl_conditional_copy_numeric!(
+    conditional_copy_f64,
+    conditional_copy_f64_to,
+    f64,
+    i64,
+    W64,
+    FloatArray
+);
 
 #[cfg(feature = "datetime")]
-impl_conditional_copy_datetime!(conditional_copy_datetime32, i32, i32, W32);
+impl_conditional_copy_datetime!(
+    conditional_copy_datetime32,
+    conditional_copy_datetime32_to,
+    i32,
+    i32,
+    W32
+);
 #[cfg(feature = "datetime")]
-impl_conditional_copy_datetime!(conditional_copy_datetime64, i64, i64, W64);
+impl_conditional_copy_datetime!(
+    conditional_copy_datetime64,
+    conditional_copy_datetime64_to,
+    i64,
+    i64,
+    W64
+);
+
+/// Zero-allocation variant: writes directly to caller's output buffer.
+///
+/// Conditional copy for floating-point arrays with runtime type dispatch.
+/// Panics if output.len() != mask.len.
+#[inline(always)]
+pub fn conditional_copy_float_to<T: Copy + 'static>(
+    mask: &BooleanArray<()>,
+    then_data: &[T],
+    else_data: &[T],
+    output: &mut [T],
+) {
+    if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() {
+        unsafe {
+            conditional_copy_f32_to(
+                mask,
+                std::mem::transmute(then_data),
+                std::mem::transmute(else_data),
+                std::mem::transmute(output),
+            )
+        };
+        return;
+    }
+    if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f64>() {
+        unsafe {
+            conditional_copy_f64_to(
+                mask,
+                std::mem::transmute(then_data),
+                std::mem::transmute(else_data),
+                std::mem::transmute(output),
+            )
+        };
+        return;
+    }
+    unreachable!("unsupported float type")
+}
 
 /// Conditional copy for floating-point arrays with runtime type dispatch.
 #[inline(always)]
@@ -210,41 +358,33 @@ pub fn conditional_copy_float<T: Copy + 'static>(
     then_data: &[T],
     else_data: &[T],
 ) -> FloatArray<T> {
-    if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() {
-        return unsafe {
-            std::mem::transmute(conditional_copy_f32(
-                mask,
-                std::mem::transmute(then_data),
-                std::mem::transmute(else_data),
-            ))
-        };
+    let len = mask.len;
+    let mut data = prealloc_vec::<T>(len);
+    conditional_copy_float_to(mask, then_data, else_data, &mut data);
+    FloatArray {
+        data: data.into(),
+        null_mask: mask.null_mask.clone(),
     }
-    if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f64>() {
-        return unsafe {
-            std::mem::transmute(conditional_copy_f64(
-                mask,
-                std::mem::transmute(then_data),
-                std::mem::transmute(else_data),
-            ))
-        };
-    }
-    unreachable!("unsupported float type")
 }
 
 // Bit-packed Boolean
+/// Zero-allocation variant: writes directly to caller's output buffer.
+///
 /// Conditional copy operation for boolean bitmask arrays.
-pub fn conditional_copy_bool(
+/// The output Bitmask must have capacity >= mask.len.
+pub fn conditional_copy_bool_to(
     mask: &BooleanArray<()>,
     then_data: &Bitmask,
     else_data: &Bitmask,
-) -> Result<BooleanArray<()>, KernelError> {
+    output: &mut Bitmask,
+) -> Result<(), KernelError> {
     let len_bits = mask.len;
     confirm_capacity("if_then_else: then_data", then_data.capacity(), len_bits)?;
     confirm_capacity("if_then_else: else_data", else_data.capacity(), len_bits)?;
+    confirm_capacity("if_then_else: output", output.capacity(), len_bits)?;
 
     // Dense fast-path
     if mask.null_mask.is_none() {
-        let mut out = Bitmask::with_capacity(len_bits);
         for i in 0..len_bits {
             let m = unsafe { mask.data.get_unchecked(i) };
             let v = if m {
@@ -252,19 +392,12 @@ pub fn conditional_copy_bool(
             } else {
                 unsafe { else_data.get_unchecked(i) }
             };
-            out.set(i, v);
+            output.set(i, v);
         }
-        return Ok(BooleanArray {
-            data: out.into(),
-            null_mask: None,
-            len: len_bits,
-            _phantom: PhantomData,
-        });
+        return Ok(());
     }
 
     // Null-aware path
-    let mut out = Bitmask::with_capacity(len_bits);
-    let mut out_mask = Bitmask::new_set_all(len_bits, false);
     for i in 0..len_bits {
         if !mask
             .null_mask
@@ -279,8 +412,42 @@ pub fn conditional_copy_bool(
         } else {
             unsafe { else_data.get_unchecked(i) }
         };
-        out.set(i, v);
-        out_mask.set(i, true);
+        output.set(i, v);
+    }
+
+    Ok(())
+}
+
+/// Conditional copy operation for boolean bitmask arrays.
+pub fn conditional_copy_bool(
+    mask: &BooleanArray<()>,
+    then_data: &Bitmask,
+    else_data: &Bitmask,
+) -> Result<BooleanArray<()>, KernelError> {
+    let len_bits = mask.len;
+    let mut out = Bitmask::with_capacity(len_bits);
+    conditional_copy_bool_to(mask, then_data, else_data, &mut out)?;
+
+    // Dense fast-path
+    if mask.null_mask.is_none() {
+        return Ok(BooleanArray {
+            data: out.into(),
+            null_mask: None,
+            len: len_bits,
+            _phantom: PhantomData,
+        });
+    }
+
+    // Null-aware path: build output mask
+    let mut out_mask = Bitmask::new_set_all(len_bits, false);
+    for i in 0..len_bits {
+        if mask
+            .null_mask
+            .as_ref()
+            .map_or(true, |m| unsafe { m.get_unchecked(i) })
+        {
+            out_mask.set(i, true);
+        }
     }
 
     Ok(BooleanArray {

@@ -81,7 +81,28 @@ mod simd_impl {
 
 /// Generates integer negation functions with SIMD optimisation.
 macro_rules! impl_unary_neg_int {
-    ($fn_name:ident, $ty:ty, $lanes:expr) => {
+    ($fn_name:ident, $fn_name_to:ident, $ty:ty, $lanes:expr) => {
+        /// Zero-allocation variant: writes directly to caller's output buffer.
+        ///
+        /// Canonical implementation with SIMD acceleration.
+        /// Panics if input.len() != output.len().
+        #[inline(always)]
+        pub fn $fn_name_to(input: &[$ty], output: &mut [$ty]) {
+            assert_eq!(
+                input.len(),
+                output.len(),
+                concat!(stringify!($fn_name_to), ": input/output length mismatch")
+            );
+
+            #[cfg(feature = "simd")]
+            simd_impl::negate_dense::<$ty, $lanes>(input, output);
+
+            #[cfg(not(feature = "simd"))]
+            for i in 0..input.len() {
+                output[i] = -input[i];
+            }
+        }
+
         /// Negates all elements in an integer array.
         ///
         /// Applies the unary negation operator to each element in the array,
@@ -100,13 +121,7 @@ macro_rules! impl_unary_neg_int {
             let src = &arr.data[offset..offset + len];
             let mut data = prealloc_vec::<$ty>(len);
 
-            #[cfg(feature = "simd")]
-            simd_impl::negate_dense::<$ty, $lanes>(src, &mut data);
-
-            #[cfg(not(feature = "simd"))]
-            for i in 0..len {
-                data[i] = -src[i];
-            }
+            $fn_name_to(src, &mut data);
 
             IntegerArray {
                 data: data.into(),
@@ -119,7 +134,28 @@ macro_rules! impl_unary_neg_int {
 #[cfg(feature = "datetime")]
 /// Generates datetime negation functions with SIMD optimisation.
 macro_rules! impl_unary_neg_datetime {
-    ($fn_name:ident, $ty:ty, $lanes:expr) => {
+    ($fn_name:ident, $fn_name_to:ident, $ty:ty, $lanes:expr) => {
+        /// Zero-allocation variant: writes directly to caller's output buffer.
+        ///
+        /// Canonical implementation with SIMD acceleration.
+        /// Panics if input.len() != output.len().
+        #[inline(always)]
+        pub fn $fn_name_to(input: &[$ty], output: &mut [$ty]) {
+            assert_eq!(
+                input.len(),
+                output.len(),
+                concat!(stringify!($fn_name_to), ": input/output length mismatch")
+            );
+
+            #[cfg(feature = "simd")]
+            simd_impl::negate_dense::<$ty, $lanes>(input, output);
+
+            #[cfg(not(feature = "simd"))]
+            for i in 0..input.len() {
+                output[i] = -input[i];
+            }
+        }
+
         /// Negates all elements in a datetime array.
         ///
         /// Applies the unary negation operator to each element in the datetime array,
@@ -138,13 +174,7 @@ macro_rules! impl_unary_neg_datetime {
             let src = &arr.data[offset..offset + len];
             let mut data = prealloc_vec::<$ty>(len);
 
-            #[cfg(feature = "simd")]
-            simd_impl::negate_dense::<$ty, $lanes>(src, &mut data);
-
-            #[cfg(not(feature = "simd"))]
-            for i in 0..len {
-                data[i] = -src[i];
-            }
+            $fn_name_to(src, &mut data);
 
             DatetimeArray {
                 data: data.into(),
@@ -187,15 +217,15 @@ where
 }
 
 #[cfg(feature = "datetime")]
-impl_unary_neg_datetime!(unary_neg_datetime_i32, i32, W32);
+impl_unary_neg_datetime!(unary_neg_datetime_i32, unary_neg_datetime_i32_to, i32, W32);
 #[cfg(feature = "datetime")]
-impl_unary_neg_datetime!(unary_neg_datetime_i64, i64, W64);
+impl_unary_neg_datetime!(unary_neg_datetime_i64, unary_neg_datetime_i64_to, i64, W64);
 #[cfg(feature = "extended_numeric_types")]
-impl_unary_neg_int!(unary_neg_i8, i8, W8);
+impl_unary_neg_int!(unary_neg_i8, unary_neg_i8_to, i8, W8);
 #[cfg(feature = "extended_numeric_types")]
-impl_unary_neg_int!(unary_neg_i16, i16, W16);
-impl_unary_neg_int!(unary_neg_i32, i32, W32);
-impl_unary_neg_int!(unary_neg_i64, i64, W64);
+impl_unary_neg_int!(unary_neg_i16, unary_neg_i16_to, i16, W16);
+impl_unary_neg_int!(unary_neg_i32, unary_neg_i32_to, i32, W32);
+impl_unary_neg_int!(unary_neg_i64, unary_neg_i64_to, i64, W64);
 
 // Unified entry point
 
@@ -237,6 +267,22 @@ where
     unreachable!("unsupported integer type")
 }
 
+/// Zero-allocation variant: writes directly to caller's output buffer.
+///
+/// Panics if input.len() != output.len().
+#[inline(always)]
+pub fn unary_negate_u32_to_i32_to(input: &[u32], output: &mut [i32]) {
+    assert_eq!(
+        input.len(),
+        output.len(),
+        "unary_negate_u32_to_i32_to: input/output length mismatch"
+    );
+
+    for (dst, &v) in output.iter_mut().zip(input) {
+        *dst = -(v as i32);
+    }
+}
+
 /// Negates u32 values and converts them to i32.
 ///
 /// Applies unary negation to unsigned 32-bit integers and returns
@@ -254,13 +300,43 @@ pub fn unary_negate_u32_to_i32(window: IntegerAVT<u32>) -> IntegerArray<i32> {
     let src = &arr.data[offset..offset + len];
     let mut data = prealloc_vec::<i32>(len);
 
-    for (dst, &v) in data.iter_mut().zip(src) {
-        *dst = -(v as i32);
-    }
+    unary_negate_u32_to_i32_to(src, &mut data);
 
     IntegerArray {
         data: data.into(),
         null_mask: arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len)),
+    }
+}
+
+/// Zero-allocation variant: writes directly to caller's output buffer.
+///
+/// Panics if input.len() != output.len().
+#[inline(always)]
+pub fn unary_negate_u64_to_i64_to(input: &[u64], output: &mut [i64]) {
+    let len = input.len();
+    assert_eq!(
+        len,
+        output.len(),
+        "unary_negate_u64_to_i64_to: input/output length mismatch"
+    );
+
+    #[cfg(feature = "simd")]
+    {
+        use core::simd::Simd;
+        const LANES: usize = W64;
+        let mut i = 0;
+        while i + LANES <= len {
+            let v = Simd::<u64, LANES>::from_slice(&input[i..i + LANES]).cast::<i64>();
+            (Simd::<i64, LANES>::splat(0) - v).copy_to_slice(&mut output[i..i + LANES]);
+            i += LANES;
+        }
+        for j in i..len {
+            output[j] = -(input[j] as i64);
+        }
+    }
+    #[cfg(not(feature = "simd"))]
+    for (dst, &v) in output.iter_mut().zip(input) {
+        *dst = -(v as i64);
     }
 }
 
@@ -281,24 +357,7 @@ pub fn unary_negate_u64_to_i64(window: IntegerAVT<u64>) -> IntegerArray<i64> {
     let src = &arr.data[offset..offset + len];
     let mut data = prealloc_vec::<i64>(len);
 
-    #[cfg(feature = "simd")]
-    {
-        use core::simd::Simd;
-        const LANES: usize = W64;
-        let mut i = 0;
-        while i + LANES <= len {
-            let v = Simd::<u64, LANES>::from_slice(&src[i..i + LANES]).cast::<i64>();
-            (Simd::<i64, LANES>::splat(0) - v).copy_to_slice(&mut data[i..i + LANES]);
-            i += LANES;
-        }
-        for j in i..len {
-            data[j] = -(src[j] as i64);
-        }
-    }
-    #[cfg(not(feature = "simd"))]
-    for (dst, &v) in data.iter_mut().zip(src) {
-        *dst = -(v as i64);
-    }
+    unary_negate_u64_to_i64_to(src, &mut data);
 
     IntegerArray {
         data: data.into(),
@@ -310,7 +369,28 @@ pub fn unary_negate_u64_to_i64(window: IntegerAVT<u64>) -> IntegerArray<i64> {
 
 /// Generates floating-point negation functions with SIMD optimisation.
 macro_rules! impl_unary_neg_float {
-    ($fname:ident, $ty:ty, $lanes:expr) => {
+    ($fname:ident, $fname_to:ident, $ty:ty, $lanes:expr) => {
+        /// Zero-allocation variant: writes directly to caller's output buffer.
+        ///
+        /// Canonical implementation with SIMD acceleration.
+        /// Panics if input.len() != output.len().
+        #[inline(always)]
+        pub fn $fname_to(input: &[$ty], output: &mut [$ty]) {
+            assert_eq!(
+                input.len(),
+                output.len(),
+                concat!(stringify!($fname_to), ": input/output length mismatch")
+            );
+
+            #[cfg(feature = "simd")]
+            simd_impl::negate_dense::<$ty, $lanes>(input, output);
+
+            #[cfg(not(feature = "simd"))]
+            for i in 0..input.len() {
+                output[i] = -input[i];
+            }
+        }
+
         /// Negates all elements in a floating-point array.
         ///
         /// Applies the unary negation operator to each element in the array,
@@ -329,13 +409,7 @@ macro_rules! impl_unary_neg_float {
             let src = &arr.data[offset..offset + len];
             let mut data = prealloc_vec::<$ty>(len);
 
-            #[cfg(feature = "simd")]
-            simd_impl::negate_dense::<$ty, $lanes>(src, &mut data);
-
-            #[cfg(not(feature = "simd"))]
-            for i in 0..len {
-                data[i] = -src[i];
-            }
+            $fname_to(src, &mut data);
 
             FloatArray {
                 data: data.into(),
@@ -345,8 +419,8 @@ macro_rules! impl_unary_neg_float {
     };
 }
 
-impl_unary_neg_float!(unary_neg_f32, f32, W32);
-impl_unary_neg_float!(unary_neg_f64, f64, W64);
+impl_unary_neg_float!(unary_neg_f32, unary_neg_f32_to, f32, W32);
+impl_unary_neg_float!(unary_neg_f64, unary_neg_f64_to, f64, W64);
 
 /// Generic floating-point negation dispatcher.
 ///

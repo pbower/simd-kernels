@@ -13,34 +13,38 @@
 //! versions when data alignment requirements are not met.
 
 use minarrow::enums::error::KernelError;
-use minarrow::{Bitmask, FloatArray};
+use minarrow::{Bitmask, FloatArray, Vec64};
 use std::simd::{Simd, StdFloat, cmp::SimdPartialOrd, num::SimdFloat};
 
 use crate::kernels::scientific::distributions::shared::scalar::{ln_gamma_simd, *};
 use crate::kernels::scientific::distributions::univariate::common::simd::{
-    dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
+    dense_univariate_kernel_f64_simd_to, masked_univariate_kernel_f64_simd_to,
+};
+use crate::kernels::scientific::distributions::univariate::common::std::{
+    dense_univariate_kernel_f64_std_to, masked_univariate_kernel_f64_std_to,
 };
 use crate::utils::has_nulls;
+use minarrow::utils::is_simd_aligned;
 
-/// SIMD-accelerated implementation of binomial distribution probability mass function.
+/// SIMD-accelerated binomial PMF (zero-allocation variant).
 ///
-/// Processes multiple PMF evaluations simultaneously using vectorised logarithmic
-/// computations for improved performance on large datasets with 64-byte memory alignment.
+/// Writes directly to caller-provided output buffer.
 #[inline(always)]
-pub fn binomial_pmf_simd(
+pub fn binomial_pmf_simd_to(
     k: &[u64],
     n: u64,
     p: f64,
+    output: &mut [f64],
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Result<FloatArray<f64>, KernelError> {
+) -> Result<(), KernelError> {
     if !(0.0 <= p && p <= 1.0) || !p.is_finite() {
         return Err(KernelError::InvalidArguments(
             "binomial_pmf: invalid p".into(),
         ));
     }
     if k.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     const N: usize = W64;
@@ -77,53 +81,75 @@ pub fn binomial_pmf_simd(
         valid.select(pmf, Simd::splat(0.0))
     };
 
-    // Dense fast path
-    if !has_nulls(null_count, null_mask) {
-        let k_f64: Vec<f64> = k.iter().map(|&ki| ki as f64).collect();
+    let k_f64: Vec<f64> = k.iter().map(|&ki| ki as f64).collect();
 
-        let (out, out_mask) = dense_univariate_kernel_f64_simd::<N, _, _>(
+    if !has_nulls(null_count, null_mask) {
+        if is_simd_aligned(&k_f64) {
+            dense_univariate_kernel_f64_simd_to::<N, _, _>(&k_f64, output, simd_body, scalar_body);
+            return Ok(());
+        }
+        dense_univariate_kernel_f64_std_to(&k_f64, output, scalar_body);
+        return Ok(());
+    }
+
+    let mask = null_mask.expect("null_count > 0 requires null_mask");
+    let mut out_mask = mask.clone();
+    if is_simd_aligned(&k_f64) {
+        masked_univariate_kernel_f64_simd_to::<N, _, _>(
             &k_f64,
-            null_mask.is_some(),
+            mask,
+            output,
+            &mut out_mask,
             simd_body,
             scalar_body,
         );
-
-        return Ok(FloatArray {
-            data: out.into(),
-            null_mask: out_mask,
-        });
+        return Ok(());
     }
-
-    // Null-aware masked path
-    let mask = null_mask.expect("null_count > 0 requires null_mask");
-    let k_f64: Vec<f64> = k.iter().map(|&ki| ki as f64).collect();
-
-    let (out, out_mask) =
-        masked_univariate_kernel_f64_simd::<N, _, _>(&k_f64, mask, simd_body, scalar_body);
-
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(out_mask),
-    })
+    masked_univariate_kernel_f64_std_to(&k_f64, mask, output, &mut out_mask, scalar_body);
+    Ok(())
 }
 
-/// Partially SIMD-accelerated implementation of binomial distribution cumulative distribution function.
-/// There is little benefit here except in null mask handling.
+/// SIMD-accelerated implementation of binomial distribution probability mass function.
 #[inline(always)]
-pub fn binomial_cdf_simd(
+pub fn binomial_pmf_simd(
     k: &[u64],
     n: u64,
     p: f64,
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
+    let len = k.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    binomial_pmf_simd_to(k, n, p, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// SIMD-accelerated binomial CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn binomial_cdf_simd_to(
+    k: &[u64],
+    n: u64,
+    p: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     if !(p >= 0.0 && p <= 1.0) || n > 1_000_000_000 {
         return Err(KernelError::InvalidArguments(
             "binomial_cdf: invalid p or n".into(),
         ));
     }
     if k.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     const N: usize = W64;
@@ -148,17 +174,12 @@ pub fn binomial_cdf_simd(
         let one_simd = Simd::<f64, N>::splat(1.0);
         let zero_simd = Simd::<f64, N>::splat(0.0);
 
-        // Handle simple edge cases with SIMD
         let ki_ge_n = k_u.simd_ge(n_simd);
-
-        // Edge case results
-        let mut result = one_simd; // Default for ki >= n and p == 0
+        let mut result = one_simd;
 
         if p == 1.0 {
-            // p=1: return 1.0 if ki >= n, else 0.0
             result = ki_ge_n.select(one_simd, zero_simd);
         } else if p != 0.0 {
-            // Need incomplete_beta for ki < n
             let mut out_arr = [0.0f64; N];
             let k_arr = k_v.to_array();
             for i in 0..N {
@@ -175,29 +196,52 @@ pub fn binomial_cdf_simd(
         result
     };
 
-    // Use SIMD for edge cases, scalar fallback for incomplete_beta
+    let k_f64: Vec<f64> = k.iter().map(|&ki| ki as f64).collect();
+
     if !has_nulls(null_count, null_mask) {
-        let k_f64: Vec<f64> = k.iter().map(|&ki| ki as f64).collect();
-        let (data, mask) = dense_univariate_kernel_f64_simd::<N, _, _>(
+        if is_simd_aligned(&k_f64) {
+            dense_univariate_kernel_f64_simd_to::<N, _, _>(&k_f64, output, simd_body, scalar_body);
+            return Ok(());
+        }
+        dense_univariate_kernel_f64_std_to(&k_f64, output, scalar_body);
+        return Ok(());
+    }
+
+    let mask = null_mask.expect("null_count > 0 requires null_mask");
+    let mut out_mask = mask.clone();
+    if is_simd_aligned(&k_f64) {
+        masked_univariate_kernel_f64_simd_to::<N, _, _>(
             &k_f64,
-            null_mask.is_some(),
+            mask,
+            output,
+            &mut out_mask,
             simd_body,
             scalar_body,
         );
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        return Ok(());
+    }
+    masked_univariate_kernel_f64_std_to(&k_f64, mask, output, &mut out_mask, scalar_body);
+    Ok(())
+}
+
+/// Partially SIMD-accelerated implementation of binomial distribution cumulative distribution function.
+#[inline(always)]
+pub fn binomial_cdf_simd(
+    k: &[u64],
+    n: u64,
+    p: f64,
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<FloatArray<f64>, KernelError> {
+    let len = k.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
     }
 
-    // Null-aware masked path
-    let mask = null_mask.expect("null_count > 0 requires null_mask");
-    let k_f64: Vec<f64> = k.iter().map(|&ki| ki as f64).collect();
-    let (data, out_mask) =
-        masked_univariate_kernel_f64_simd::<N, _, _>(&k_f64, mask, simd_body, scalar_body);
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    binomial_cdf_simd_to(k, n, p, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

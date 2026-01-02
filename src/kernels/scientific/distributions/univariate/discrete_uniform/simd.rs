@@ -20,6 +20,84 @@ use crate::utils::bitmask_to_simd_mask;
 use crate::utils::has_nulls;
 use minarrow::enums::error::KernelError;
 
+/// Discrete uniform PMF SIMD (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn discrete_uniform_pmf_simd_to(
+    k: &[i64],
+    low: i64,
+    high: i64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    if low >= high {
+        return Err(KernelError::InvalidArguments(
+            "discrete_uniform_pmf: require low < high (upper exclusive)".into(),
+        ));
+    }
+
+    // span = N = high - low  (≥ 1)
+    let span = high.checked_sub(low).ok_or_else(|| {
+        KernelError::InvalidArguments("discrete_uniform_pmf: range overflow".into())
+    })?;
+    let p = 1.0 / (span as f64);
+
+    let len = k.len();
+    if len == 0 {
+        return Ok(());
+    }
+
+    const N: usize = W64;
+    let low_v = Simd::<i64, N>::splat(low);
+    let high_v = Simd::<i64, N>::splat(high);
+    let p_v = Simd::<f64, N>::splat(p);
+    let zero_v = Simd::<f64, N>::splat(0.0);
+
+    if !has_nulls(null_count, null_mask) {
+        let mut i = 0;
+        while i + N <= len {
+            let kv = Simd::<i64, N>::from_slice(&k[i..i + N]);
+            let in_range = kv.simd_ge(low_v) & kv.simd_lt(high_v); // [low, high)
+            let y = in_range.select(p_v, zero_v);
+            output[i..i + N].copy_from_slice(&y.to_array());
+            i += N;
+        }
+        for (idx, &ki) in k[i..].iter().enumerate() {
+            output[i + idx] = if (low..high).contains(&ki) { p } else { 0.0 };
+        }
+        return Ok(());
+    }
+
+    let mask_ref = null_mask.expect("discrete_uniform_pmf: null_count > 0 requires null_mask");
+
+    let mask_bytes = mask_ref.as_bytes();
+    let mut i = 0;
+    while i + N <= len {
+        let lane_mask: Mask<i64, N> = bitmask_to_simd_mask::<N, i64>(mask_bytes, i, len);
+
+        let kv = Simd::<i64, N>::from_slice(&k[i..i + N]);
+
+        let in_range = kv.simd_ge(low_v) & kv.simd_lt(high_v);
+        let y = in_range.select(p_v, zero_v);
+
+        let res = lane_mask.select(y, Simd::<f64, N>::splat(f64::NAN));
+        output[i..i + N].copy_from_slice(res.as_array());
+        i += N;
+    }
+    for idx in i..len {
+        if !unsafe { mask_ref.get_unchecked(idx) } {
+            output[idx] = f64::NAN;
+        } else {
+            let ki = k[idx];
+            output[idx] = if (low..high).contains(&ki) { p } else { 0.0 };
+        }
+    }
+
+    Ok(())
+}
+
 /// SIMD-accelerated implementation of discrete uniform distribution probability mass function.
 ///
 /// Processes multiple PMF evaluations simultaneously using vectorised integer comparisons
@@ -49,87 +127,31 @@ pub fn discrete_uniform_pmf_simd(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    if low >= high {
-        return Err(KernelError::InvalidArguments(
-            "discrete_uniform_pmf: require low < high (upper exclusive)".into(),
-        ));
-    }
-
-    // span = N = high - low  (≥ 1)
-    let span = high.checked_sub(low).ok_or_else(|| {
-        KernelError::InvalidArguments("discrete_uniform_pmf: range overflow".into())
-    })?;
-    let p = 1.0 / (span as f64);
-
     let len = k.len();
     if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    const N: usize = W64;
-    let low_v = Simd::<i64, N>::splat(low);
-    let high_v = Simd::<i64, N>::splat(high);
-    let p_v = Simd::<f64, N>::splat(p);
-    let zero_v = Simd::<f64, N>::splat(0.0);
-
-    if !has_nulls(null_count, null_mask) {
-        let mut out = Vec64::with_capacity(len);
-        let mut i = 0;
-        while i + N <= len {
-            let kv = Simd::<i64, N>::from_slice(&k[i..i + N]);
-            let in_range = kv.simd_ge(low_v) & kv.simd_lt(high_v); // [low, high)
-            let y = in_range.select(p_v, zero_v);
-            out.extend_from_slice(&y.to_array());
-            i += N;
-        }
-        for &ki in &k[i..] {
-            out.push(if (low..high).contains(&ki) { p } else { 0.0 });
-        }
-        return Ok(FloatArray::from_vec64(out, null_mask.cloned()));
-    }
-
-    let mask_ref = null_mask.expect("discrete_uniform_pmf: null_count > 0 requires null_mask");
     let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    let mask_bytes = mask_ref.as_bytes();
-    let mut i = 0;
-    while i + N <= len {
-        let lane_mask: Mask<i64, N> = bitmask_to_simd_mask::<N, i64>(mask_bytes, i, len);
+    discrete_uniform_pmf_simd_to(k, low, high, out.as_mut_slice(), null_mask, null_count)?;
 
-        let kv = Simd::<i64, N>::from_slice(&k[i..i + N]);
-
-        let in_range = kv.simd_ge(low_v) & kv.simd_lt(high_v);
-        let y = in_range.select(p_v, zero_v);
-
-        let res = lane_mask.select(y, Simd::<f64, N>::splat(f64::NAN));
-        out.extend_from_slice(res.as_array());
-        i += N;
-    }
-    for idx in i..len {
-        if !unsafe { mask_ref.get_unchecked(idx) } {
-            out.push(f64::NAN);
-        } else {
-            let ki = k[idx];
-            out.push(if (low..high).contains(&ki) { p } else { 0.0 });
-        }
-    }
-
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(mask_ref.clone()),
-    })
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }
 
-/// Discrete uniform CDF (lower tail, inclusive; upper-exclusive support).
-/// F(k) = 0 for k < low; F(k) = 1 for k ≥ high−1; else F(k) = (k − low + 1)/(high − low).
+/// Discrete uniform CDF SIMD (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
 #[inline(always)]
-pub fn discrete_uniform_cdf_simd(
+pub fn discrete_uniform_cdf_simd_to(
     k: &[i64],
     low: i64,
     high: i64,
+    output: &mut [f64],
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Result<FloatArray<f64>, KernelError> {
+) -> Result<(), KernelError> {
     if low >= high {
         return Err(KernelError::InvalidArguments(
             "discrete_uniform_cdf: require low < high (upper exclusive)".into(),
@@ -144,7 +166,7 @@ pub fn discrete_uniform_cdf_simd(
 
     let len = k.len();
     if len == 0 {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     const N: usize = W64;
@@ -156,7 +178,6 @@ pub fn discrete_uniform_cdf_simd(
     let invn_v = Simd::<f64, N>::splat(inv_n);
 
     if !has_nulls(null_count, null_mask) {
-        let mut out = Vec64::with_capacity(len);
         let mut i = 0;
         while i + N <= len {
             let kv = Simd::<i64, N>::from_slice(&k[i..i + N]);
@@ -170,24 +191,22 @@ pub fn discrete_uniform_cdf_simd(
             let tmp = below.select(zero_f, mid);
             let y = at_or_above_max.select(one_f, tmp);
 
-            out.extend_from_slice(&y.to_array());
+            output[i..i + N].copy_from_slice(&y.to_array());
             i += N;
         }
-        for &ki in &k[i..] {
-            let v = if ki < low {
+        for (idx, &ki) in k[i..].iter().enumerate() {
+            output[i + idx] = if ki < low {
                 0.0
             } else if ki >= high - 1 {
                 1.0
             } else {
                 ((ki - low + 1) as f64) * inv_n
             };
-            out.push(v);
         }
-        return Ok(FloatArray::from_vec64(out, null_mask.cloned()));
+        return Ok(());
     }
 
     let mask_ref = null_mask.expect("discrete_uniform_cdf: null_count > 0 requires null_mask");
-    let mut out = Vec64::with_capacity(len);
 
     let mask_bytes = mask_ref.as_bytes();
     let mut i = 0;
@@ -210,43 +229,62 @@ pub fn discrete_uniform_cdf_simd(
         let y = at_or_above_max.select(one_f, tmp);
 
         let res = lane_mask.select(y, Simd::<f64, N>::splat(f64::NAN));
-        out.extend_from_slice(res.as_array());
+        output[i..i + N].copy_from_slice(res.as_array());
         i += N;
     }
     for idx in i..len {
         if !unsafe { mask_ref.get_unchecked(idx) } {
-            out.push(f64::NAN);
+            output[idx] = f64::NAN;
         } else {
             let ki = k[idx];
-            let v = if ki < low {
+            output[idx] = if ki < low {
                 0.0
             } else if ki >= high - 1 {
                 1.0
             } else {
                 ((ki - low + 1) as f64) * inv_n
             };
-            out.push(v);
         }
     }
 
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(mask_ref.clone()),
-    })
+    Ok(())
 }
 
-/// Discrete uniform quantile (lower tail; upper-exclusive support).
-/// Support = {low, …, high−1}, N = high−low.
-/// Q(p) = low + clamp(ceil(p*N)−1, −1, N−1).
-/// p is clamped to [0,1]; NaN -> NaN (valid).
+/// Discrete uniform CDF (lower tail, inclusive; upper-exclusive support).
+/// F(k) = 0 for k < low; F(k) = 1 for k ≥ high−1; else F(k) = (k − low + 1)/(high − low).
 #[inline(always)]
-pub fn discrete_uniform_quantile_simd(
-    p: &[f64],
+pub fn discrete_uniform_cdf_simd(
+    k: &[i64],
     low: i64,
     high: i64,
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
+    let len = k.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    discrete_uniform_cdf_simd_to(k, low, high, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Discrete uniform quantile SIMD (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn discrete_uniform_quantile_simd_to(
+    p: &[f64],
+    low: i64,
+    high: i64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     if low >= high {
         return Err(KernelError::InvalidArguments(
             "discrete_uniform_quantile: require low < high (upper exclusive)".into(),
@@ -261,7 +299,7 @@ pub fn discrete_uniform_quantile_simd(
 
     let len = p.len();
     if len == 0 {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     const NLANES: usize = W64;
@@ -274,7 +312,6 @@ pub fn discrete_uniform_quantile_simd(
     let n_1_i = Simd::<i64, NLANES>::splat((span as i64) - 1);
 
     if !has_nulls(null_count, null_mask) {
-        let mut out = Vec64::with_capacity(len);
         let mut i = 0;
         while i + NLANES <= len {
             let pv = Simd::<f64, NLANES>::from_slice(&p[i..i + NLANES]);
@@ -286,32 +323,31 @@ pub fn discrete_uniform_quantile_simd(
             let ceil_i = tfi + frac_nonzero.select(one_i, Simd::splat(0));
             let idx = (ceil_i - one_i).simd_clamp(neg1_i, n_1_i); // [-1, N-1]
             let k_i = low_i + idx; // low-1 .. high-1
-            out.extend_from_slice(&k_i.cast::<f64>().to_array());
+            output[i..i + NLANES].copy_from_slice(&k_i.cast::<f64>().to_array());
             i += NLANES;
         }
-        for &pi in &p[i..] {
+        for (j, &pi) in p[i..].iter().enumerate() {
             if pi.is_nan() {
-                out.push(f64::NAN);
-                continue;
+                output[i + j] = f64::NAN;
+            } else {
+                let pc = pi.clamp(0.0, 1.0);
+                let t = (pc * n_f).ceil();
+                let mut idx = (t as i64).saturating_sub(1);
+                let n_minus1 = (span as i64).saturating_sub(1);
+                if idx < -1 {
+                    idx = -1;
+                }
+                if idx > n_minus1 {
+                    idx = n_minus1;
+                }
+                let k = (low as i64).saturating_add(idx);
+                output[i + j] = k as f64;
             }
-            let pc = pi.clamp(0.0, 1.0);
-            let t = (pc * n_f).ceil();
-            let mut idx = (t as i64).saturating_sub(1);
-            let n_minus1 = (span as i64).saturating_sub(1);
-            if idx < -1 {
-                idx = -1;
-            }
-            if idx > n_minus1 {
-                idx = n_minus1;
-            }
-            let k = (low as i64).saturating_add(idx);
-            out.push(k as f64);
         }
-        return Ok(FloatArray::from_vec64(out, null_mask.cloned()));
+        return Ok(());
     }
 
     let mask_ref = null_mask.expect("discrete_uniform_quantile: null_count > 0 requires null_mask");
-    let mut out = Vec64::with_capacity(len);
 
     let mask_bytes = mask_ref.as_bytes();
     let mut i = 0;
@@ -329,16 +365,16 @@ pub fn discrete_uniform_quantile_simd(
         let k_i = low_i + idx;
 
         let res = lane_mask.select(k_i.cast::<f64>(), Simd::<f64, NLANES>::splat(f64::NAN));
-        out.extend_from_slice(res.as_array());
+        output[i..i + NLANES].copy_from_slice(res.as_array());
         i += NLANES;
     }
     for idx in i..len {
         if !unsafe { mask_ref.get_unchecked(idx) } {
-            out.push(f64::NAN);
+            output[idx] = f64::NAN;
         } else {
             let pi = p[idx];
             if pi.is_nan() {
-                out.push(f64::NAN);
+                output[idx] = f64::NAN;
             } else {
                 let pc = pi.clamp(0.0, 1.0);
                 let t = (pc * n_f).ceil();
@@ -351,13 +387,35 @@ pub fn discrete_uniform_quantile_simd(
                     id = n_minus1;
                 }
                 let k = (low as i64).saturating_add(id);
-                out.push(k as f64);
+                output[idx] = k as f64;
             }
         }
     }
 
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(mask_ref.clone()),
-    })
+    Ok(())
+}
+
+/// Discrete uniform quantile (lower tail; upper-exclusive support).
+/// Support = {low, …, high−1}, N = high−low.
+/// Q(p) = low + clamp(ceil(p*N)−1, −1, N−1).
+/// p is clamped to [0,1]; NaN -> NaN (valid).
+#[inline(always)]
+pub fn discrete_uniform_quantile_simd(
+    p: &[f64],
+    low: i64,
+    high: i64,
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<FloatArray<f64>, KernelError> {
+    let len = p.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    discrete_uniform_quantile_simd_to(p, low, high, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

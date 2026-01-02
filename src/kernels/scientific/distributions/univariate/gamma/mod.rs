@@ -31,9 +31,32 @@
 mod simd;
 mod std;
 
-use minarrow::{Bitmask, FloatArray};
-
+use minarrow::Bitmask;
+use minarrow::FloatArray;
 use minarrow::enums::error::KernelError;
+
+/// Gamma distribution PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn gamma_pdf_to(
+    x: &[f64],
+    shape: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::gamma_pdf_simd_to(x, shape, scale, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::gamma_pdf_std_to(x, shape, scale, output, null_mask, null_count)
+    }
+}
 
 /// Computes the probability density function (PDF) of the gamma distribution.
 ///
@@ -100,6 +123,21 @@ pub fn gamma_pdf(
     }
 }
 
+/// Gamma distribution CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn gamma_cdf_to(
+    x: &[f64],
+    shape: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::gamma_cdf_std_to(x, shape, scale, output, null_mask, null_count)
+}
+
 /// Computes the cumulative distribution function (CDF) of the gamma distribution.
 ///
 /// Evaluates F(x; α, β) = P(α, βx) = γ(α, βx) / Γ(α) for each element in the input array,
@@ -152,6 +190,21 @@ pub fn gamma_cdf(
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
     std::gamma_cdf_std(x, shape, scale, null_mask, null_count)
+}
+
+/// Gamma distribution quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn gamma_quantile_to(
+    p: &[f64],
+    shape: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::gamma_quantile_std_to(p, shape, scale, output, null_mask, null_count)
 }
 
 /// Computes the quantile function (inverse CDF) of the gamma distribution.

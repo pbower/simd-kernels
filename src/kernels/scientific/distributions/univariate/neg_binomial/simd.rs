@@ -12,15 +12,77 @@ use std::f64;
 
 use std::simd::{Simd, StdFloat, num::SimdUint};
 
-use minarrow::{Bitmask, FloatArray};
+use minarrow::{Bitmask, FloatArray, Vec64};
 
 use crate::kernels::scientific::distributions::shared::scalar::*;
 use crate::kernels::scientific::distributions::univariate::common::simd::{
-    dense_univariate_kernel_u64_simd, masked_univariate_kernel_u64_simd,
+    dense_univariate_kernel_u64_simd_to, masked_univariate_kernel_u64_simd_to,
 };
 use minarrow::enums::error::KernelError;
 
 use crate::utils::has_nulls;
+
+/// Negative Binomial PMF SIMD (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn neg_binomial_pmf_simd_to(
+    k: &[u64],
+    r: u64,
+    p: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    // 1) Parameter checks
+    if r == 0 || !(p > 0.0 && p < 1.0) || !p.is_finite() {
+        return Err(KernelError::InvalidArguments(
+            "neg_binomial_pmf: r must be positive, p ∈ (0,1), and both finite".into(),
+        ));
+    }
+    // 2) Empty input
+    if k.is_empty() {
+        return Ok(());
+    }
+
+    const N: usize = W64;
+    let log_p = p.ln();
+    let log1mp = (1.0 - p).ln();
+    let r_f64 = r as f64;
+
+    let scalar_body = move |ki: u64| {
+        let lf = ln_choose(ki + r - 1, ki);
+        (lf + r_f64 * log_p + (ki as f64) * log1mp).exp()
+    };
+
+    let simd_body = move |k_u: Simd<u64, N>| {
+        let kf = k_u.cast::<f64>();
+        // ln C(k+r-1, k) + r*ln(p) + k*ln(1-p)
+        let ln_comb = ln_choose_v(kf + Simd::splat(r_f64) - Simd::splat(1.0), kf);
+        let logpmf = ln_comb + Simd::splat(r_f64) * Simd::splat(log_p) + kf * Simd::splat(log1mp);
+        logpmf.exp()
+    };
+
+    // Dense fast path (no nulls)
+    if !has_nulls(null_count, null_mask) {
+        dense_univariate_kernel_u64_simd_to::<N, _, _>(k, output, simd_body, scalar_body);
+        return Ok(());
+    }
+
+    // Null‐aware masked path
+    let mask_ref = null_mask.expect("neg_binomial_pmf: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_u64_simd_to::<N, _, _>(
+        k,
+        mask_ref,
+        output,
+        &mut out_mask,
+        simd_body,
+        scalar_body,
+    );
+
+    Ok(())
+}
 
 /// **Negative Binomial Distribution Probability Mass Function** - *SIMD-Accelerated Discrete PMF*
 ///
@@ -71,54 +133,15 @@ pub fn neg_binomial_pmf_simd(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // 1) Parameter checks
-    if r == 0 || !(p > 0.0 && p < 1.0) || !p.is_finite() {
-        return Err(KernelError::InvalidArguments(
-            "neg_binomial_pmf: r must be positive, p ∈ (0,1), and both finite".into(),
-        ));
-    }
-    // 2) Empty input
-    if k.is_empty() {
+    let len = k.len();
+    if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    const N: usize = W64;
-    let log_p = p.ln();
-    let log1mp = (1.0 - p).ln();
-    let r_f64 = r as f64;
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    let scalar_body = move |ki: u64| {
-        let lf = ln_choose(ki + r - 1, ki);
-        (lf + r_f64 * log_p + (ki as f64) * log1mp).exp()
-    };
+    neg_binomial_pmf_simd_to(k, r, p, out.as_mut_slice(), null_mask, null_count)?;
 
-    let simd_body = move |k_u: Simd<u64, N>| {
-        let kf = k_u.cast::<f64>();
-        // ln C(k+r-1, k) + r*ln(p) + k*ln(1-p)
-        let ln_comb = ln_choose_v(kf + Simd::splat(r_f64) - Simd::splat(1.0), kf);
-        let logpmf = ln_comb + Simd::splat(r_f64) * Simd::splat(log_p) + kf * Simd::splat(log1mp);
-        logpmf.exp()
-    };
-
-    // Dense fast path (no nulls)
-    if !has_nulls(null_count, null_mask) {
-        // if a mask was passed (with null_count==0), we still want to return an all-true mask
-        let has_mask = null_mask.is_some();
-        let (data, mask) =
-            dense_univariate_kernel_u64_simd::<N, _, _>(k, has_mask, simd_body, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
-    }
-
-    // Null‐aware masked path
-    let mask_ref = null_mask.expect("neg_binomial_pmf: null_count > 0 requires null_mask");
-    let (data, out_mask) =
-        masked_univariate_kernel_u64_simd::<N, _, _>(k, mask_ref, simd_body, scalar_body);
-
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

@@ -64,6 +64,28 @@ mod std;
 use minarrow::enums::error::KernelError;
 use minarrow::{Bitmask, FloatArray};
 
+/// Poisson PMF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn poisson_pmf_to(
+    k: &[u64],
+    lambda: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::poisson_pmf_simd_to(k, lambda, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::poisson_pmf_std_to(k, lambda, output, null_mask, null_count)
+    }
+}
+
 /// Poisson PMF: P(K=k|λ) = e^{-λ} · λ^k / k!
 /// k: observed event counts (all ≥ 0)
 /// λ: event rate (λ > 0, finite)
@@ -85,6 +107,20 @@ pub fn poisson_pmf(
     }
 }
 
+/// Poisson CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn poisson_cdf_to(
+    k: &[u64],
+    lambda: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::poisson_cdf_std_to(k, lambda, output, null_mask, null_count)
+}
+
 /// Poisson CDF: F(K=k|λ) = ∑_{i=0}^k Poisson_PMF(i, λ)
 /// Efficient and robust using the lower regularised incomplete gamma:
 /// F(K=k|λ) = γ(⌊k+1⌋, λ) / Γ(⌊k+1⌋)
@@ -98,16 +134,24 @@ pub fn poisson_cdf(
     std::poisson_cdf_std(k, lambda, null_mask, null_count)
 }
 
+/// Poisson quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn poisson_quantile_to(
+    p: &[f64],
+    lambda: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::poisson_quantile_std_to(p, lambda, output, null_mask, null_count)
+}
+
 /// Poisson quantile function (inverse CDF).
 ///
 /// For probability `p` ∈ (0,1), returns the smallest integer `k` such that
 ///     Pr[X ≤ k] ≥ p, where X ~ Poisson(λ).
-/// Returns error for λ < 0, or any p not in (0,1).
-/// Poisson quantile function (inverse CDF).
-///
-/// For probability `p` ∈ (0,1), returns the smallest integer `k` such that
-///     Pr[X ≤ k] ≥ p, where X ~ Poisson(λ).
-/// Returns error for λ < 0, or any p not in (0,1).
 #[inline(always)]
 pub fn poisson_quantile(
     p: &[f64],

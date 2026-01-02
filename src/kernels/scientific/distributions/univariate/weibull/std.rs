@@ -7,23 +7,29 @@
 //! and survival analysis applications. These implementations emphasise numerical stability across
 //! the wide parameter ranges encountered in practical applications.
 
-use minarrow::{Bitmask, FloatArray};
+use minarrow::{Bitmask, FloatArray, Vec64};
 
 use crate::kernels::scientific::distributions::univariate::common::std::{
-    dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
+    dense_univariate_kernel_f64_std, dense_univariate_kernel_f64_std_to,
+    masked_univariate_kernel_f64_std, masked_univariate_kernel_f64_std_to,
 };
 use minarrow::enums::error::KernelError;
 
 use crate::utils::has_nulls;
 
+/// Weibull PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// f(x|k,λ) = (k/λ) × (x/λ)^(k-1) × exp(-(x/λ)^k) for x ≥ 0, else 0
 #[inline(always)]
-pub fn weibull_pdf_std(
+pub fn weibull_pdf_std_to(
     x: &[f64],
     shape: f64,
     scale: f64,
+    output: &mut [f64],
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Result<FloatArray<f64>, KernelError> {
+) -> Result<(), KernelError> {
     // parameter checks
     if !(shape > 0.0 && shape.is_finite()) || !(scale > 0.0 && scale.is_finite()) {
         return Err(KernelError::InvalidArguments(
@@ -31,13 +37,13 @@ pub fn weibull_pdf_std(
         ));
     }
     if x.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     let inv_scale = 1.0 / scale;
     let coeff = shape * inv_scale; // k/λ
 
-    // scalar & SIMD kernels
+    // scalar kernel
     let scalar_body = move |xi: f64| -> f64 {
         if xi < 0.0 {
             0.0
@@ -50,33 +56,52 @@ pub fn weibull_pdf_std(
 
     // dense (null-free) path
     if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        return Ok(());
     }
 
     // null-aware path
     let mask_ref = null_mask.expect("weibull_pdf: null_count > 0 requires null_mask");
-    let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
 
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(())
 }
 
-/// Weibull CDF: F(x; k, λ) = 1 − exp[−(x/λ)^k]  for x ≥ 0, else 0
 #[inline(always)]
-pub fn weibull_cdf_std(
+pub fn weibull_pdf_std(
     x: &[f64],
     shape: f64,
     scale: f64,
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    weibull_pdf_std_to(x, shape, scale, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Weibull CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// F(x|k,λ) = 1 − exp[−(x/λ)^k] for x ≥ 0, else 0
+#[inline(always)]
+pub fn weibull_cdf_std_to(
+    x: &[f64],
+    shape: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     // parameter checks
     if !(shape > 0.0 && shape.is_finite()) || !(scale > 0.0 && scale.is_finite()) {
         return Err(KernelError::InvalidArguments(
@@ -84,7 +109,7 @@ pub fn weibull_cdf_std(
         ));
     }
     if x.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     let inv_scale = 1.0 / scale;
@@ -99,35 +124,53 @@ pub fn weibull_cdf_std(
 
     // dense (null-free) path
     if !has_nulls(null_count, null_mask) {
-        // covers all true null mask plus no mask supplied case
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        return Ok(());
     }
 
     // null-aware path
     let mask_ref = null_mask.expect("weibull_cdf: null_count > 0 requires null_mask");
-    let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
 
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(())
 }
 
-/// Weibull quantile (inverse CDF):
-/// Q(p; k, λ) = λ · [−ln(1−p)]^(1/k),  p ∈ (0,1)
+/// Weibull CDF: F(x; k, λ) = 1 − exp[−(x/λ)^k]  for x ≥ 0, else 0
 #[inline(always)]
-pub fn weibull_quantile_std(
-    p: &[f64],
+pub fn weibull_cdf_std(
+    x: &[f64],
     shape: f64,
     scale: f64,
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    weibull_cdf_std_to(x, shape, scale, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Weibull quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// Q(p|k,λ) = λ · [−ln(1−p)]^(1/k), p ∈ (0,1)
+#[inline(always)]
+pub fn weibull_quantile_std_to(
+    p: &[f64],
+    shape: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     // parameter checks
     if !(shape > 0.0 && shape.is_finite()) || !(scale > 0.0 && scale.is_finite()) {
         return Err(KernelError::InvalidArguments(
@@ -135,7 +178,7 @@ pub fn weibull_quantile_std(
         ));
     }
     if p.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     let inv_k = 1.0 / shape;
@@ -156,21 +199,37 @@ pub fn weibull_quantile_std(
 
     // dense (null-free) path
     if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some(); // create all-true mask if caller supplied one
-        let (data, mask) = dense_univariate_kernel_f64_std(p, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        dense_univariate_kernel_f64_std_to(p, output, scalar_body);
+        return Ok(());
     }
 
     // null-aware path
     let mask_ref = null_mask.expect("weibull_quantile: null_count > 0 requires null_mask");
-    let (data, out_mask) = masked_univariate_kernel_f64_std(p, mask_ref, scalar_body);
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(p, mask_ref, output, &mut out_mask, scalar_body);
 
-    Ok(FloatArray {
-        data: data.into(),
-        // propagate the (possibly pre-existing) mask; we don’t add extra nulls
-        null_mask: Some(out_mask),
-    })
+    Ok(())
+}
+
+/// Weibull quantile (inverse CDF):
+/// Q(p; k, λ) = λ · [−ln(1−p)]^(1/k),  p ∈ (0,1)
+#[inline(always)]
+pub fn weibull_quantile_std(
+    p: &[f64],
+    shape: f64,
+    scale: f64,
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<FloatArray<f64>, KernelError> {
+    let len = p.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    weibull_quantile_std_to(p, shape, scale, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

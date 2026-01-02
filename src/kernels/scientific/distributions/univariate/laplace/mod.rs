@@ -38,6 +38,76 @@ mod std;
 
 use minarrow::enums::error::KernelError;
 use minarrow::{Bitmask, FloatArray};
+
+/// Laplace PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn laplace_pdf_to(
+    x: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::laplace_pdf_simd_to(x, location, scale, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::laplace_pdf_std_to(x, location, scale, output, null_mask, null_count)
+    }
+}
+
+/// Laplace CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn laplace_cdf_to(
+    x: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::laplace_cdf_simd_to(x, location, scale, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::laplace_cdf_std_to(x, location, scale, output, null_mask, null_count)
+    }
+}
+
+/// Laplace quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn laplace_quantile_to(
+    p: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::laplace_quantile_simd_to(p, location, scale, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::laplace_quantile_std_to(p, location, scale, output, null_mask, null_count)
+    }
+}
+
 /// Compute the probability density function (PDF) for the Laplace distribution.
 ///
 /// The Laplace distribution, also known as the double exponential distribution, is a continuous

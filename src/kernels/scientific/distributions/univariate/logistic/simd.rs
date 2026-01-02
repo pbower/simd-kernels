@@ -23,17 +23,87 @@ use std::simd::{
 };
 
 use minarrow::utils::is_simd_aligned;
-use minarrow::{Bitmask, FloatArray};
+use minarrow::{Bitmask, FloatArray, Vec64};
 
 use crate::kernels::scientific::distributions::univariate::common::simd::{
-    dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
+    dense_univariate_kernel_f64_simd_to, masked_univariate_kernel_f64_simd_to,
 };
 use crate::kernels::scientific::distributions::univariate::common::std::{
-    dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
+    dense_univariate_kernel_f64_std_to, masked_univariate_kernel_f64_std_to,
 };
 use minarrow::enums::error::KernelError;
 
 use crate::utils::has_nulls;
+
+/// SIMD-accelerated Logistic PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// f(x|μ, s) = exp(-(x-μ)/s) / [s × (1 + exp(-(x-μ)/s))²]
+#[inline(always)]
+pub fn logistic_pdf_simd_to(
+    x: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    // Parameter checks
+    if scale <= 0.0 || !scale.is_finite() || !location.is_finite() {
+        return Err(KernelError::InvalidArguments(
+            "logistic_pdf: invalid parameters".into(),
+        ));
+    }
+    if x.is_empty() {
+        return Ok(());
+    }
+
+    const N: usize = W64;
+
+    let loc_v = Simd::<f64, N>::splat(location);
+    let scale_v = Simd::<f64, N>::splat(scale);
+    let one_v = Simd::<f64, N>::splat(1.0);
+
+    let scalar_body = move |xi: f64| -> f64 {
+        let z = (xi - location) / scale;
+        let ez = (-z).exp();
+        ez / (scale * (1.0 + ez).powi(2))
+    };
+
+    let simd_body = move |x_v: Simd<f64, N>| {
+        let z = (x_v - loc_v) / scale_v;
+        let ez = (-z).exp();
+        ez / (scale_v * (one_v + ez) * (one_v + ez))
+    };
+
+    // Dense fast path (no nulls)
+    if !has_nulls(null_count, null_mask) {
+        if is_simd_aligned(x) {
+            dense_univariate_kernel_f64_simd_to::<N, _, _>(x, output, simd_body, scalar_body);
+        } else {
+            dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        }
+        return Ok(());
+    }
+
+    // Null-aware masked path
+    let mask_ref = null_mask.expect("logistic_pdf: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    if is_simd_aligned(x) {
+        masked_univariate_kernel_f64_simd_to::<N, _, _>(
+            x,
+            mask_ref,
+            output,
+            &mut out_mask,
+            simd_body,
+            scalar_body,
+        );
+    } else {
+        masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
+    }
+
+    Ok(())
+}
 
 /// SIMD-accelerated implementation of logistic distribution probability density function.
 ///
@@ -79,80 +149,93 @@ pub fn logistic_pdf_simd(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // Parameter checks
-    if scale <= 0.0 || !scale.is_finite() || !location.is_finite() {
-        return Err(KernelError::InvalidArguments(
-            "logistic_pdf: invalid parameters".into(),
-        ));
-    }
-    if x.is_empty() {
+    let len = x.len();
+    if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    const N: usize = W64;
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    // SIMD splats
+    logistic_pdf_simd_to(
+        x,
+        location,
+        scale,
+        out.as_mut_slice(),
+        null_mask,
+        null_count,
+    )?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// SIMD-accelerated Logistic CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// F(x|μ, s) = 1 / (1 + exp(-(x-μ)/s))
+#[inline(always)]
+pub fn logistic_cdf_simd_to(
+    x: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    // Parameter checks
+    if scale <= 0.0 || !scale.is_finite() || !location.is_finite() {
+        return Err(KernelError::InvalidArguments(
+            "logistic_cdf: invalid parameters".into(),
+        ));
+    }
+    if x.is_empty() {
+        return Ok(());
+    }
+
+    const N: usize = W64;
+    let inv_s = 1.0 / scale;
 
     let loc_v = Simd::<f64, N>::splat(location);
-    let scale_v = Simd::<f64, N>::splat(scale);
+    let inv_s_v = Simd::<f64, N>::splat(inv_s);
     let one_v = Simd::<f64, N>::splat(1.0);
 
-    // Scalar fallback
     let scalar_body = move |xi: f64| -> f64 {
-        let z = (xi - location) / scale;
-        let ez = (-z).exp();
-        ez / (scale * (1.0 + ez).powi(2))
+        let z = (xi - location) * inv_s;
+        1.0 / (1.0 + (-z).exp())
     };
 
-    // SIMD body
     let simd_body = move |x_v: Simd<f64, N>| {
-        let z = (x_v - loc_v) / scale_v;
-        let ez = (-z).exp();
-        ez / (scale_v * (one_v + ez) * (one_v + ez))
+        let z = (x_v - loc_v) * inv_s_v;
+        one_v / (one_v + (-z).exp())
     };
 
     // Dense fast path (no nulls)
     if !has_nulls(null_count, null_mask) {
-        // Check if arrays are SIMD 64-byte aligned
         if is_simd_aligned(x) {
-            let has_mask = null_mask.is_some();
-            let (data, mask) =
-                dense_univariate_kernel_f64_simd::<N, _, _>(x, has_mask, simd_body, scalar_body);
-            return Ok(FloatArray {
-                data: data.into(),
-                null_mask: mask,
-            });
+            dense_univariate_kernel_f64_simd_to::<N, _, _>(x, output, simd_body, scalar_body);
+        } else {
+            dense_univariate_kernel_f64_std_to(x, output, scalar_body);
         }
-
-        // Scalar fallback - alignment check failed
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        return Ok(());
     }
 
     // Null-aware masked path
-    let mask_ref = null_mask.expect("logistic_pdf: null_count > 0 requires null_mask");
-
-    // Check if arrays are SIMD 64-byte aligned
+    let mask_ref = null_mask.expect("null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
     if is_simd_aligned(x) {
-        let (data, out_mask) =
-            masked_univariate_kernel_f64_simd::<N, _, _>(x, mask_ref, simd_body, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: Some(out_mask),
-        });
+        masked_univariate_kernel_f64_simd_to::<N, _, _>(
+            x,
+            mask_ref,
+            output,
+            &mut out_mask,
+            simd_body,
+            scalar_body,
+        );
+    } else {
+        masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
     }
 
-    // Scalar fallback - alignment check failed
-    let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(())
 }
 
 /// SIMD-accelerated implementation of logistic distribution cumulative distribution function.
@@ -207,80 +290,113 @@ pub fn logistic_cdf_simd(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // Parameter checks
-    if scale <= 0.0 || !scale.is_finite() || !location.is_finite() {
-        return Err(KernelError::InvalidArguments(
-            "logistic_cdf: invalid parameters".into(),
-        ));
-    }
-    // Empty input
-    if x.is_empty() {
+    let len = x.len();
+    if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    const N: usize = W64;
-    let inv_s = 1.0 / scale;
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    // SIMD splats
+    logistic_cdf_simd_to(
+        x,
+        location,
+        scale,
+        out.as_mut_slice(),
+        null_mask,
+        null_count,
+    )?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// SIMD-accelerated Logistic quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// Q(p) = location + scale * ln(p / (1 - p))
+#[inline(always)]
+pub fn logistic_quantile_simd_to(
+    p: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    // Parameter checks
+    if !location.is_finite() || !scale.is_finite() || scale <= 0.0 {
+        return Err(KernelError::InvalidArguments(
+            "logistic_quantile: invalid location or scale".into(),
+        ));
+    }
+    if p.is_empty() {
+        return Ok(());
+    }
+
+    const N: usize = W64;
 
     let loc_v = Simd::<f64, N>::splat(location);
-    let inv_s_v = Simd::<f64, N>::splat(inv_s);
+    let scale_v = Simd::<f64, N>::splat(scale);
     let one_v = Simd::<f64, N>::splat(1.0);
 
-    // Scalar fallback
-    let scalar_body = move |xi: f64| -> f64 {
-        let z = (xi - location) * inv_s;
-        1.0 / (1.0 + (-z).exp())
-    };
-
-    // SIMD body
-    let simd_body = move |x_v: Simd<f64, N>| {
-        let z = (x_v - loc_v) * inv_s_v;
-        one_v / (one_v + (-z).exp())
-    };
-
-    // Dense fast path (no nulls)
-    if !has_nulls(null_count, null_mask) {
-        // Check if arrays are SIMD 64-byte aligned
-        if is_simd_aligned(x) {
-            let has_mask = null_mask.is_some();
-            let (data, mask) =
-                dense_univariate_kernel_f64_simd::<N, _, _>(x, has_mask, simd_body, scalar_body);
-            return Ok(FloatArray {
-                data: data.into(),
-                null_mask: mask,
-            });
+    let scalar_body = move |pi: f64| -> f64 {
+        // Q(p | μ, s) = μ + s · ln( p / (1-p) ) only for 0 < p < 1  and  p finite
+        if pi > 0.0 && pi < 1.0 && pi.is_finite() {
+            location + scale * (pi.ln() - (1.0 - pi).ln())
+        } else if pi == 0.0 {
+            NEG_INFINITY
+        } else if pi == 1.0 {
+            INFINITY
+        } else {
+            f64::NAN
         }
+    };
 
-        // Scalar fallback - alignment check failed
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+    let simd_body = move |p_v: Simd<f64, N>| {
+        let zero_v = Simd::<f64, N>::splat(0.0);
+        let ninf_v = Simd::<f64, N>::splat(NEG_INFINITY);
+        let pinf_v = Simd::<f64, N>::splat(INFINITY);
+        let nan_v = Simd::<f64, N>::splat(f64::NAN);
+
+        // Handle edge cases
+        let is_zero = p_v.simd_eq(zero_v);
+        let is_one = p_v.simd_eq(one_v);
+        let is_valid = p_v.simd_gt(zero_v) & p_v.simd_lt(one_v) & p_v.is_finite();
+
+        // Q(p | μ, s) = μ + s · ln( p / (1-p) ) for 0 < p < 1
+        let qv = loc_v + scale_v * (p_v.ln() - (one_v - p_v).ln());
+
+        // Select appropriate result: -inf for p=0, +inf for p=1, NaN for invalid, qv for valid
+        is_zero.select(ninf_v, is_one.select(pinf_v, is_valid.select(qv, nan_v)))
+    };
+
+    // Dense fast path
+    if !has_nulls(null_count, null_mask) {
+        if is_simd_aligned(p) {
+            dense_univariate_kernel_f64_simd_to::<N, _, _>(p, output, simd_body, scalar_body);
+        } else {
+            dense_univariate_kernel_f64_std_to(p, output, scalar_body);
+        }
+        return Ok(());
     }
 
     // Null-aware masked path
     let mask_ref = null_mask.expect("null_count > 0 requires null_mask");
-
-    // Check if arrays are SIMD 64-byte aligned
-    if is_simd_aligned(x) {
-        let (data, out_mask) =
-            masked_univariate_kernel_f64_simd::<N, _, _>(x, mask_ref, simd_body, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: Some(out_mask),
-        });
+    let mut out_mask = mask_ref.clone();
+    if is_simd_aligned(p) {
+        masked_univariate_kernel_f64_simd_to::<N, _, _>(
+            p,
+            mask_ref,
+            output,
+            &mut out_mask,
+            simd_body,
+            scalar_body,
+        );
+    } else {
+        masked_univariate_kernel_f64_std_to(p, mask_ref, output, &mut out_mask, scalar_body);
     }
 
-    // Scalar fallback - alignment check failed
-    let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(())
 }
 
 /// SIMD-accelerated implementation of logistic distribution quantile function.
@@ -327,96 +443,22 @@ pub fn logistic_quantile_simd(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // Parameter checks
-    if !location.is_finite() || !scale.is_finite() || scale <= 0.0 {
-        return Err(KernelError::InvalidArguments(
-            "logistic_quantile: invalid location or scale".into(),
-        ));
-    }
-    // Empty input
-    if p.is_empty() {
+    let len = p.len();
+    if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    // Constants
-    const N: usize = W64;
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    let loc_v = Simd::<f64, N>::splat(location);
-    let scale_v = Simd::<f64, N>::splat(scale);
-    let one_v = Simd::<f64, N>::splat(1.0);
+    logistic_quantile_simd_to(
+        p,
+        location,
+        scale,
+        out.as_mut_slice(),
+        null_mask,
+        null_count,
+    )?;
 
-    // Scalar fallback
-    let scalar_body = move |pi: f64| -> f64 {
-        // Q(p | μ, s) = μ + s · ln( p / (1-p) ) only for 0 < p < 1  and  p finite
-        if pi > 0.0 && pi < 1.0 && pi.is_finite() {
-            location + scale * (pi.ln() - (1.0 - pi).ln())
-        } else if pi == 0.0 {
-            NEG_INFINITY
-        } else if pi == 1.0 {
-            INFINITY
-        } else {
-            f64::NAN
-        }
-    };
-
-    // SIMD body
-    let simd_body = move |p_v: Simd<f64, N>| {
-        let zero_v = Simd::<f64, N>::splat(0.0);
-        let ninf_v = Simd::<f64, N>::splat(NEG_INFINITY);
-        let pinf_v = Simd::<f64, N>::splat(INFINITY);
-        let nan_v = Simd::<f64, N>::splat(f64::NAN);
-
-        // Handle edge cases
-        let is_zero = p_v.simd_eq(zero_v);
-        let is_one = p_v.simd_eq(one_v);
-        let is_valid = p_v.simd_gt(zero_v) & p_v.simd_lt(one_v) & p_v.is_finite();
-
-        // Q(p | μ, s) = μ + s · ln( p / (1-p) ) for 0 < p < 1
-        let qv = loc_v + scale_v * (p_v.ln() - (one_v - p_v).ln());
-
-        // Select appropriate result: -inf for p=0, +inf for p=1, NaN for invalid, qv for valid
-        is_zero.select(ninf_v, is_one.select(pinf_v, is_valid.select(qv, nan_v)))
-    };
-
-    // Dense fast path
-    if !has_nulls(null_count, null_mask) {
-        // Check if arrays are SIMD 64-byte aligned
-        if is_simd_aligned(p) {
-            let has_mask = null_mask.is_some();
-            let (data, mask) =
-                dense_univariate_kernel_f64_simd::<N, _, _>(p, has_mask, simd_body, scalar_body);
-            return Ok(FloatArray {
-                data: data.into(),
-                null_mask: mask,
-            });
-        }
-        // Scalar fallback - alignment check failed
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(p, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
-    }
-
-    // Null-aware masked path
-    let mask_ref = null_mask.expect("null_count > 0 requires null_mask");
-
-    // Check if arrays are SIMD 64-byte aligned
-    if is_simd_aligned(p) {
-        let (data, out_mask) =
-            masked_univariate_kernel_f64_simd(p, mask_ref, simd_body, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: Some(out_mask),
-        });
-    }
-
-    // Scalar fallback - alignment check failed
-    let (data, out_mask) = masked_univariate_kernel_f64_std(p, mask_ref, scalar_body);
-
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

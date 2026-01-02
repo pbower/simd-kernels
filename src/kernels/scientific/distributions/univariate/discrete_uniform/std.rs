@@ -6,16 +6,18 @@ use minarrow::{Bitmask, FloatArray, Vec64};
 use crate::utils::has_nulls;
 use minarrow::enums::error::KernelError;
 
-/// Discrete uniform PMF (SciPy randint semantics: support = {low, …, high-1}).
-/// P(X=k) = 1/(high−low) for k ∈ [low, high), else 0.
+/// Discrete uniform PMF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
 #[inline(always)]
-pub fn discrete_uniform_pmf_std(
+pub fn discrete_uniform_pmf_std_to(
     k: &[i64],
     low: i64,
     high: i64,
+    output: &mut [f64],
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Result<FloatArray<f64>, KernelError> {
+) -> Result<(), KernelError> {
     if low >= high {
         return Err(KernelError::InvalidArguments(
             "discrete_uniform_pmf: require low < high (upper exclusive)".into(),
@@ -28,31 +30,106 @@ pub fn discrete_uniform_pmf_std(
     let p = 1.0 / (span as f64);
 
     if k.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     if !has_nulls(null_count, null_mask) {
-        let mut out = Vec64::with_capacity(k.len());
-        for &ki in k {
-            out.push(if (low..high).contains(&ki) { p } else { 0.0 });
+        for (i, &ki) in k.iter().enumerate() {
+            output[i] = if (low..high).contains(&ki) { p } else { 0.0 };
         }
-        return Ok(FloatArray::from_vec64(out, null_mask.cloned()));
+        return Ok(());
     }
 
     let mask = null_mask.expect("discrete_uniform_pmf: null_count > 0 requires null_mask");
-    let mut out = Vec64::with_capacity(k.len());
     for i in 0..k.len() {
         if !unsafe { mask.get_unchecked(i) } {
-            out.push(f64::NAN);
+            output[i] = f64::NAN;
         } else {
             let ki = k[i];
-            out.push(if (low..high).contains(&ki) { p } else { 0.0 });
+            output[i] = if (low..high).contains(&ki) { p } else { 0.0 };
         }
     }
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(mask.clone()),
-    })
+    Ok(())
+}
+
+/// Discrete uniform PMF (SciPy randint semantics: support = {low, …, high-1}).
+/// P(X=k) = 1/(high−low) for k ∈ [low, high), else 0.
+#[inline(always)]
+pub fn discrete_uniform_pmf_std(
+    k: &[i64],
+    low: i64,
+    high: i64,
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<FloatArray<f64>, KernelError> {
+    let len = k.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    discrete_uniform_pmf_std_to(k, low, high, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Discrete uniform CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn discrete_uniform_cdf_std_to(
+    k: &[i64],
+    low: i64,
+    high: i64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    if low >= high {
+        return Err(KernelError::InvalidArguments(
+            "discrete_uniform_cdf: require low < high (upper exclusive)".into(),
+        ));
+    }
+
+    let span = high.checked_sub(low).ok_or_else(|| {
+        KernelError::InvalidArguments("discrete_uniform_cdf: range overflow".into())
+    })?; // N = high - low
+    let inv_n = 1.0 / (span as f64);
+    if k.is_empty() {
+        return Ok(());
+    }
+
+    if !has_nulls(null_count, null_mask) {
+        for (i, &ki) in k.iter().enumerate() {
+            output[i] = if ki < low {
+                0.0
+            } else if ki >= high - 1 {
+                1.0
+            } else {
+                ((ki - low + 1) as f64) * inv_n
+            };
+        }
+        return Ok(());
+    }
+
+    let mask = null_mask.expect("discrete_uniform_cdf: null_count > 0 requires null_mask");
+    for i in 0..k.len() {
+        if !unsafe { mask.get_unchecked(i) } {
+            output[i] = f64::NAN;
+        } else {
+            let ki = k[i];
+            output[i] = if ki < low {
+                0.0
+            } else if ki >= high - 1 {
+                1.0
+            } else {
+                ((ki - low + 1) as f64) * inv_n
+            };
+        }
+    }
+    Ok(())
 }
 
 /// Discrete uniform CDF (lower tail, inclusive).
@@ -65,56 +142,80 @@ pub fn discrete_uniform_cdf_std(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
+    let len = k.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    discrete_uniform_cdf_std_to(k, low, high, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Discrete uniform quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn discrete_uniform_quantile_std_to(
+    p: &[f64],
+    low: i64,
+    high: i64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     if low >= high {
         return Err(KernelError::InvalidArguments(
-            "discrete_uniform_cdf: require low < high (upper exclusive)".into(),
+            "discrete_uniform_quantile: require low < high (upper exclusive)".into(),
         ));
     }
 
     let span = high.checked_sub(low).ok_or_else(|| {
-        KernelError::InvalidArguments("discrete_uniform_cdf: range overflow".into())
-    })?; // N = high - low
-    let inv_n = 1.0 / (span as f64);
-    if k.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        KernelError::InvalidArguments("discrete_uniform_quantile: range overflow".into())
+    })?; // N = high - low ≥ 1
+    let n_f = span as f64;
+    if p.is_empty() {
+        return Ok(());
     }
+
+    // Helper closure for computing quantile value
+    let compute_quantile = |pi: f64| -> f64 {
+        if pi.is_nan() {
+            return f64::NAN;
+        }
+        let pc = pi.clamp(0.0, 1.0);
+        let t = (pc * n_f).ceil(); // t ∈ [0, N]
+        let mut idx = (t as i64).saturating_sub(1); // ∈ [-1, N-1]
+        let n_minus1 = (span as i64).saturating_sub(1);
+        if idx < -1 {
+            idx = -1;
+        }
+        if idx > n_minus1 {
+            idx = n_minus1;
+        }
+        let k = (low as i64).saturating_add(idx); // low-1 … high-1
+        k as f64
+    };
 
     if !has_nulls(null_count, null_mask) {
-        let mut out = Vec64::with_capacity(k.len());
-        for &ki in k {
-            let v = if ki < low {
-                0.0
-            } else if ki >= high - 1 {
-                1.0
-            } else {
-                ((ki - low + 1) as f64) * inv_n
-            };
-            out.push(v);
+        for (i, &pi) in p.iter().enumerate() {
+            output[i] = compute_quantile(pi);
         }
-        return Ok(FloatArray::from_vec64(out, null_mask.cloned()));
+        return Ok(());
     }
 
-    let mask = null_mask.expect("discrete_uniform_cdf: null_count > 0 requires null_mask");
-    let mut out = Vec64::with_capacity(k.len());
-    for i in 0..k.len() {
+    let mask = null_mask.expect("discrete_uniform_quantile: null_count > 0 requires null_mask");
+    for i in 0..p.len() {
         if !unsafe { mask.get_unchecked(i) } {
-            out.push(f64::NAN);
+            output[i] = f64::NAN;
         } else {
-            let ki = k[i];
-            let v = if ki < low {
-                0.0
-            } else if ki >= high - 1 {
-                1.0
-            } else {
-                ((ki - low + 1) as f64) * inv_n
-            };
-            out.push(v);
+            output[i] = compute_quantile(p[i]);
         }
     }
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(mask.clone()),
-    })
+    Ok(())
 }
 
 /// Discrete uniform quantile (lower tail) matching SciPy randint.ppf.
@@ -129,70 +230,15 @@ pub fn discrete_uniform_quantile_std(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    if low >= high {
-        return Err(KernelError::InvalidArguments(
-            "discrete_uniform_quantile: require low < high (upper exclusive)".into(),
-        ));
-    }
-
-    let span = high.checked_sub(low).ok_or_else(|| {
-        KernelError::InvalidArguments("discrete_uniform_quantile: range overflow".into())
-    })?; // N = high - low ≥ 1
-    let n_f = span as f64;
-    if p.is_empty() {
+    let len = p.len();
+    if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    if !has_nulls(null_count, null_mask) {
-        let mut out = Vec64::with_capacity(p.len());
-        for &pi in p {
-            if pi.is_nan() {
-                out.push(f64::NAN);
-                continue;
-            }
-            let pc = pi.clamp(0.0, 1.0);
-            let t = (pc * n_f).ceil(); // t ∈ [0, N]
-            let mut idx = (t as i64).saturating_sub(1); // ∈ [-1, N-1]
-            let n_minus1 = (span as i64).saturating_sub(1);
-            if idx < -1 {
-                idx = -1;
-            }
-            if idx > n_minus1 {
-                idx = n_minus1;
-            }
-            let k = (low as i64).saturating_add(idx); // low-1 … high-1
-            out.push(k as f64);
-        }
-        return Ok(FloatArray::from_vec64(out, null_mask.cloned()));
-    }
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    let mask = null_mask.expect("discrete_uniform_quantile: null_count > 0 requires null_mask");
-    let mut out = Vec64::with_capacity(p.len());
-    for i in 0..p.len() {
-        if !unsafe { mask.get_unchecked(i) } {
-            out.push(f64::NAN);
-        } else {
-            let pi = p[i];
-            if pi.is_nan() {
-                out.push(f64::NAN);
-                continue;
-            }
-            let pc = pi.clamp(0.0, 1.0);
-            let t = (pc * n_f).ceil();
-            let mut idx = (t as i64).saturating_sub(1);
-            let n_minus1 = (span as i64).saturating_sub(1);
-            if idx < -1 {
-                idx = -1;
-            }
-            if idx > n_minus1 {
-                idx = n_minus1;
-            }
-            let k = (low as i64).saturating_add(idx);
-            out.push(k as f64);
-        }
-    }
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(mask.clone()),
-    })
+    discrete_uniform_quantile_std_to(p, low, high, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

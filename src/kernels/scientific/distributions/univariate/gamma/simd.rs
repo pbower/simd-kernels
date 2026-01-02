@@ -18,12 +18,110 @@ use minarrow::{Bitmask, FloatArray, enums::error::KernelError, utils::is_simd_al
 
 use crate::kernels::scientific::distributions::shared::scalar::*;
 use crate::kernels::scientific::distributions::univariate::common::simd::{
-    dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
+    dense_univariate_kernel_f64_simd_to, masked_univariate_kernel_f64_simd_to,
 };
 use crate::kernels::scientific::distributions::univariate::common::std::{
-    dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
+    dense_univariate_kernel_f64_std_to, masked_univariate_kernel_f64_std_to,
 };
 use crate::utils::has_nulls;
+
+/// SIMD-accelerated gamma distribution PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn gamma_pdf_simd_to(
+    x: &[f64],
+    shape: f64,
+    scale: f64, // interpreted as rate β
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    if shape <= 0.0 || !shape.is_finite() || scale <= 0.0 || !scale.is_finite() {
+        return Err(KernelError::InvalidArguments(
+            "gamma_pdf: invalid shape or rate".into(),
+        ));
+    }
+    if x.is_empty() {
+        return Ok(());
+    }
+
+    const N: usize = W64;
+    let ln_gamma_k = ln_gamma(shape);
+    let beta = scale;
+    let log_norm = shape * beta.ln() - ln_gamma_k;
+
+    let shape_v = Simd::<f64, N>::splat(shape);
+    let beta_v = Simd::<f64, N>::splat(beta);
+    let log_norm_v = Simd::<f64, N>::splat(log_norm);
+    let one_v = Simd::<f64, N>::splat(1.0);
+    let zero_v = Simd::<f64, N>::splat(0.0);
+
+    let scalar_body = |xi: f64| -> f64 {
+        if !xi.is_finite() {
+            return f64::NAN;
+        }
+        if xi < 0.0 {
+            return 0.0;
+        }
+        if xi == 0.0 {
+            return if shape > 1.0 {
+                0.0
+            } else if shape < 1.0 {
+                f64::INFINITY
+            } else {
+                beta
+            };
+        }
+        (log_norm + (shape - 1.0) * xi.ln() - beta * xi).exp()
+    };
+
+    let simd_body = |x_v: Simd<f64, N>| {
+        let is_nan = x_v.simd_ne(x_v);
+        let is_neg = x_v.simd_lt(zero_v);
+        let is_zero = x_v.simd_eq(zero_v);
+
+        let ln_x = x_v.ln();
+        let base = (log_norm_v + (shape_v - one_v) * ln_x - beta_v * x_v).exp();
+
+        let zero_val = if shape > 1.0 {
+            zero_v
+        } else if shape < 1.0 {
+            Simd::<f64, N>::splat(f64::INFINITY)
+        } else {
+            beta_v
+        };
+
+        let tmp = is_zero.select(zero_val, base);
+        let tmp = is_neg.select(zero_v, tmp);
+        is_nan.select(Simd::<f64, N>::splat(f64::NAN), tmp)
+    };
+
+    if !has_nulls(null_count, null_mask) {
+        if is_simd_aligned(x) {
+            dense_univariate_kernel_f64_simd_to::<N, _, _>(x, output, simd_body, scalar_body);
+            return Ok(());
+        }
+        dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        return Ok(());
+    }
+
+    let mask_ref = null_mask.expect("gamma_pdf: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    if is_simd_aligned(x) {
+        masked_univariate_kernel_f64_simd_to::<N, _, _>(
+            x,
+            mask_ref,
+            output,
+            &mut out_mask,
+            simd_body,
+            scalar_body,
+        );
+        return Ok(());
+    }
+    masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
+    Ok(())
+}
 
 /// SIMD-accelerated implementation of gamma distribution probability density function.
 ///
@@ -69,101 +167,17 @@ pub fn gamma_pdf_simd(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    if shape <= 0.0 || !shape.is_finite() || scale <= 0.0 || !scale.is_finite() {
-        return Err(KernelError::InvalidArguments(
-            "gamma_pdf: invalid shape or rate".into(),
-        ));
-    }
-    if x.is_empty() {
+    use minarrow::Vec64;
+
+    let len = x.len();
+    if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    const N: usize = W64;
-    let ln_gamma_k = ln_gamma(shape);
-    let beta = scale; // tests pass "scale" as rate β
-    // log f = k ln β - ln Γ(k) + (k-1) ln x - β x
-    let log_norm = shape * beta.ln() - ln_gamma_k;
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    let shape_v = Simd::<f64, N>::splat(shape);
-    let beta_v = Simd::<f64, N>::splat(beta);
-    let log_norm_v = Simd::<f64, N>::splat(log_norm);
-    let one_v = Simd::<f64, N>::splat(1.0);
-    let zero_v = Simd::<f64, N>::splat(0.0);
+    gamma_pdf_simd_to(x, shape, scale, out.as_mut_slice(), null_mask, null_count)?;
 
-    let scalar_body = |xi: f64| -> f64 {
-        if !xi.is_finite() {
-            return f64::NAN;
-        }
-        if xi < 0.0 {
-            return 0.0;
-        }
-        if xi == 0.0 {
-            // 0^(k-1) behavior: 0 for k>1, +∞ for k<1, and β for k=1.
-            return if shape > 1.0 {
-                0.0
-            } else if shape < 1.0 {
-                f64::INFINITY
-            } else {
-                beta
-            };
-        }
-        (log_norm + (shape - 1.0) * xi.ln() - beta * xi).exp()
-    };
-
-    let simd_body = |x_v: Simd<f64, N>| {
-        let is_nan = x_v.simd_ne(x_v);
-        let is_neg = x_v.simd_lt(zero_v);
-        let is_zero = x_v.simd_eq(zero_v);
-
-        // base log-density where x>0
-        let ln_x = x_v.ln();
-        let base = (log_norm_v + (shape_v - one_v) * ln_x - beta_v * x_v).exp();
-
-        // x == 0 branch
-        let zero_val = if shape > 1.0 {
-            zero_v
-        } else if shape < 1.0 {
-            Simd::<f64, N>::splat(f64::INFINITY)
-        } else {
-            beta_v
-        };
-
-        // select by domain
-        let tmp = is_zero.select(zero_val, base);
-        let tmp = is_neg.select(zero_v, tmp);
-        is_nan.select(Simd::<f64, N>::splat(f64::NAN), tmp)
-    };
-
-    if !has_nulls(null_count, null_mask) {
-        if is_simd_aligned(x) {
-            let has_mask = null_mask.is_some();
-            let (data, mask) =
-                dense_univariate_kernel_f64_simd::<N, _, _>(x, has_mask, simd_body, scalar_body);
-            return Ok(FloatArray {
-                data: data.into(),
-                null_mask: mask,
-            });
-        }
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
-    }
-
-    let mask_ref = null_mask.expect("gamma_pdf: null_count > 0 requires null_mask");
-    if is_simd_aligned(x) {
-        let (data, out_mask) =
-            masked_univariate_kernel_f64_simd::<N, _, _>(x, mask_ref, simd_body, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: Some(out_mask),
-        });
-    }
-    let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

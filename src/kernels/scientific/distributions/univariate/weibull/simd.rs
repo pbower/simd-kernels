@@ -13,65 +13,36 @@ use std::simd::{
     num::SimdFloat,
 };
 
-use minarrow::{Bitmask, FloatArray, enums::error::KernelError, utils::is_simd_aligned};
+use minarrow::{Bitmask, FloatArray, Vec64, enums::error::KernelError, utils::is_simd_aligned};
 
 use crate::kernels::scientific::distributions::univariate::common::simd::{
-    dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
+    dense_univariate_kernel_f64_simd_to, masked_univariate_kernel_f64_simd_to,
 };
 use crate::kernels::scientific::distributions::univariate::common::std::{
-    dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
+    dense_univariate_kernel_f64_std_to, masked_univariate_kernel_f64_std_to,
 };
 use crate::utils::has_nulls;
 
-/// **Weibull Distribution Probability Density Function** - *SIMD-Accelerated Reliability PDF*
+/// Weibull PDF SIMD (zero-allocation variant).
 ///
-/// Computes the probability density function of the Weibull distribution using vectorised SIMD operations
-/// where possible, with automatic scalar fallback for optimal performance in reliability engineering applications.
-///
-/// ## Mathematical Definition
-///
-/// The Weibull probability density function is defined as:
-///
-/// ```text
-/// f(x|k,λ) = {
-///   (k/λ) × (x/λ)^(k-1) × exp(-(x/λ)^k)   if x ≥ 0
-///   0                                     if x < 0
-/// }
-/// ```
-///
-/// Where:
-/// - `x` ∈ [0,+∞): random variable (input values, non-negative)
-/// - `k` > 0: shape parameter (determines distribution shape)
-/// - `λ` > 0: scale parameter (characteristic life)
-///
-/// ## Parameters
-///
-/// * `x` - Input data slice of `f64` values where PDF is evaluated (x ≥ 0 for non-zero density)
-/// * `shape` - Shape parameter (k), must be positive and finite
-/// * `scale` - Scale parameter (λ), must be positive and finite  
-/// * `null_mask` - Optional input null bitmap for handling missing values
-/// * `null_count` - Optional count of null values, enables optimised processing paths
-///
-/// ## Returns
-///
-/// Returns `Result<FloatArray<f64>, KernelError>` containing:
-/// * **Success**: `FloatArray` with PDF values and appropriate null mask
-/// * **Error**: `KernelError::InvalidArguments` for invalid parameters
+/// Writes directly to caller-provided output buffer.
+/// f(x|k,λ) = (k/λ) × (x/λ)^(k-1) × exp(-(x/λ)^k) for x ≥ 0, else 0
 #[inline(always)]
-pub fn weibull_pdf_simd(
+pub fn weibull_pdf_simd_to(
     x: &[f64],
     shape: f64,
     scale: f64,
+    output: &mut [f64],
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Result<FloatArray<f64>, KernelError> {
+) -> Result<(), KernelError> {
     if !(shape > 0.0 && shape.is_finite()) || !(scale > 0.0 && scale.is_finite()) {
         return Err(KernelError::InvalidArguments(
             "weibull_pdf: invalid shape or scale".into(),
         ));
     }
     if x.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     const N: usize = W64;
@@ -108,40 +79,158 @@ pub fn weibull_pdf_simd(
 
     if !has_nulls(null_count, null_mask) {
         if is_simd_aligned(x) {
-            let (data, mask) = dense_univariate_kernel_f64_simd::<N, _, _>(
-                x,
-                null_mask.is_some(),
-                simd_body,
-                scalar_body,
-            );
-            return Ok(FloatArray {
-                data: data.into(),
-                null_mask: mask,
-            });
+            dense_univariate_kernel_f64_simd_to::<N, _, _>(x, output, simd_body, scalar_body);
         } else {
-            let (data, mask) = dense_univariate_kernel_f64_std(x, null_mask.is_some(), scalar_body);
-            return Ok(FloatArray {
-                data: data.into(),
-                null_mask: mask,
-            });
+            dense_univariate_kernel_f64_std_to(x, output, scalar_body);
         }
+        return Ok(());
     }
 
     let mask_ref = null_mask.expect("weibull_pdf: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
     if is_simd_aligned(x) {
-        let (data, out_mask) =
-            masked_univariate_kernel_f64_simd::<N, _, _>(x, mask_ref, simd_body, scalar_body);
-        Ok(FloatArray {
-            data: data.into(),
-            null_mask: Some(out_mask),
-        })
+        masked_univariate_kernel_f64_simd_to::<N, _, _>(
+            x,
+            mask_ref,
+            output,
+            &mut out_mask,
+            simd_body,
+            scalar_body,
+        );
     } else {
-        let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-        Ok(FloatArray {
-            data: data.into(),
-            null_mask: Some(out_mask),
-        })
+        masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
     }
+
+    Ok(())
+}
+
+/// **Weibull Distribution Probability Density Function** - *SIMD-Accelerated Reliability PDF*
+///
+/// Computes the probability density function of the Weibull distribution using vectorised SIMD operations
+/// where possible, with automatic scalar fallback for optimal performance in reliability engineering applications.
+///
+/// ## Mathematical Definition
+///
+/// The Weibull probability density function is defined as:
+///
+/// ```text
+/// f(x|k,λ) = {
+///   (k/λ) × (x/λ)^(k-1) × exp(-(x/λ)^k)   if x ≥ 0
+///   0                                     if x < 0
+/// }
+/// ```
+///
+/// Where:
+/// - `x` ∈ [0,+∞): random variable (input values, non-negative)
+/// - `k` > 0: shape parameter (determines distribution shape)
+/// - `λ` > 0: scale parameter (characteristic life)
+///
+/// ## Parameters
+///
+/// * `x` - Input data slice of `f64` values where PDF is evaluated (x ≥ 0 for non-zero density)
+/// * `shape` - Shape parameter (k), must be positive and finite
+/// * `scale` - Scale parameter (λ), must be positive and finite
+/// * `null_mask` - Optional input null bitmap for handling missing values
+/// * `null_count` - Optional count of null values, enables optimised processing paths
+///
+/// ## Returns
+///
+/// Returns `Result<FloatArray<f64>, KernelError>` containing:
+/// * **Success**: `FloatArray` with PDF values and appropriate null mask
+/// * **Error**: `KernelError::InvalidArguments` for invalid parameters
+#[inline(always)]
+pub fn weibull_pdf_simd(
+    x: &[f64],
+    shape: f64,
+    scale: f64,
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<FloatArray<f64>, KernelError> {
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    weibull_pdf_simd_to(x, shape, scale, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Weibull CDF SIMD (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// F(x|k,λ) = 1 − exp[−(x/λ)^k] for x ≥ 0, else 0
+#[inline(always)]
+pub fn weibull_cdf_simd_to(
+    x: &[f64],
+    shape: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    if !(shape > 0.0 && shape.is_finite()) || !(scale > 0.0 && scale.is_finite()) {
+        return Err(KernelError::InvalidArguments(
+            "weibull_cdf: invalid shape or scale".into(),
+        ));
+    }
+    if x.is_empty() {
+        return Ok(());
+    }
+
+    const N: usize = W64;
+    let inv_scale = 1.0 / scale;
+
+    let scalar_body = move |xi: f64| -> f64 {
+        if xi < 0.0 {
+            0.0
+        } else {
+            1.0 - (-(xi * inv_scale).powf(shape)).exp()
+        }
+    };
+
+    let simd_body = {
+        let shape_v = Simd::<f64, N>::splat(shape);
+        let inv_s_v = Simd::<f64, N>::splat(inv_scale);
+        let one_v = Simd::<f64, N>::splat(1.0);
+        let zero_v = Simd::<f64, N>::splat(0.0);
+        move |x_v: Simd<f64, N>| {
+            let positive = x_v.simd_ge(zero_v);
+            let t = x_v * inv_s_v;
+            let t_pow = (shape_v * t.ln()).exp();
+            let cdf_pos = one_v - (-t_pow).exp();
+            positive.select(cdf_pos, zero_v)
+        }
+    };
+
+    if !has_nulls(null_count, null_mask) {
+        if is_simd_aligned(x) {
+            dense_univariate_kernel_f64_simd_to::<N, _, _>(x, output, simd_body, scalar_body);
+        } else {
+            dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        }
+        return Ok(());
+    }
+
+    let mask_ref = null_mask.expect("weibull_cdf: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    if is_simd_aligned(x) {
+        masked_univariate_kernel_f64_simd_to::<N, _, _>(
+            x,
+            mask_ref,
+            output,
+            &mut out_mask,
+            simd_body,
+            scalar_body,
+        );
+    } else {
+        masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
+    }
+
+    Ok(())
 }
 
 /// **Weibull Distribution Cumulative Distribution Function** - *SIMD-Accelerated Reliability CDF*
@@ -186,76 +275,98 @@ pub fn weibull_cdf_simd(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    if !(shape > 0.0 && shape.is_finite()) || !(scale > 0.0 && scale.is_finite()) {
-        return Err(KernelError::InvalidArguments(
-            "weibull_cdf: invalid shape or scale".into(),
-        ));
-    }
-    if x.is_empty() {
+    let len = x.len();
+    if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    const N: usize = W64;
-    let inv_scale = 1.0 / scale;
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    let scalar_body = move |xi: f64| -> f64 {
-        if xi < 0.0 {
+    weibull_cdf_simd_to(x, shape, scale, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Weibull quantile SIMD (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// Q(p|k,λ) = λ × [−ln(1−p)]^(1/k), p ∈ (0,1)
+#[inline(always)]
+pub fn weibull_quantile_simd_to(
+    p: &[f64],
+    shape: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    if !(shape > 0.0 && shape.is_finite()) || !(scale > 0.0 && scale.is_finite()) {
+        return Err(KernelError::InvalidArguments(
+            "weibull_quantile: invalid shape or scale".into(),
+        ));
+    }
+    if p.is_empty() {
+        return Ok(());
+    }
+
+    const N: usize = W64;
+    let inv_k = 1.0 / shape;
+
+    let scalar_body = move |pi: f64| -> f64 {
+        if 0.0 < pi && pi < 1.0 {
+            scale * (-(1.0 - pi).ln()).powf(inv_k)
+        } else if pi == 0.0 {
             0.0
+        } else if pi == 1.0 {
+            f64::INFINITY
         } else {
-            1.0 - (-(xi * inv_scale).powf(shape)).exp()
+            f64::NAN
         }
     };
 
     let simd_body = {
-        let shape_v = Simd::<f64, N>::splat(shape);
-        let inv_s_v = Simd::<f64, N>::splat(inv_scale);
-        let one_v = Simd::<f64, N>::splat(1.0);
+        let invk_v = Simd::<f64, N>::splat(inv_k);
+        let scale_v = Simd::<f64, N>::splat(scale);
         let zero_v = Simd::<f64, N>::splat(0.0);
-        move |x_v: Simd<f64, N>| {
-            let positive = x_v.simd_ge(zero_v);
-            let t = x_v * inv_s_v;
-            let t_pow = (shape_v * t.ln()).exp();
-            let cdf_pos = one_v - (-t_pow).exp();
-            positive.select(cdf_pos, zero_v)
+        let one_v = Simd::<f64, N>::splat(1.0);
+        let nan_v = Simd::<f64, N>::splat(f64::NAN);
+        move |p_v: Simd<f64, N>| {
+            let is_zero = p_v.simd_eq(zero_v);
+            let is_one = p_v.simd_eq(one_v);
+            let is_valid = p_v.simd_gt(zero_v) & p_v.simd_lt(one_v) & p_v.is_finite();
+            let t = -(one_v - p_v).ln();
+            let q_v = scale_v * (invk_v * t.ln()).exp();
+            let inf_v = Simd::<f64, N>::splat(f64::INFINITY);
+            is_zero.select(zero_v, is_one.select(inf_v, is_valid.select(q_v, nan_v)))
         }
     };
 
     if !has_nulls(null_count, null_mask) {
-        if is_simd_aligned(x) {
-            let (data, mask) = dense_univariate_kernel_f64_simd::<N, _, _>(
-                x,
-                null_mask.is_some(),
-                simd_body,
-                scalar_body,
-            );
-            return Ok(FloatArray {
-                data: data.into(),
-                null_mask: mask,
-            });
+        if is_simd_aligned(p) {
+            dense_univariate_kernel_f64_simd_to::<N, _, _>(p, output, simd_body, scalar_body);
         } else {
-            let (data, mask) = dense_univariate_kernel_f64_std(x, null_mask.is_some(), scalar_body);
-            return Ok(FloatArray {
-                data: data.into(),
-                null_mask: mask,
-            });
+            dense_univariate_kernel_f64_std_to(p, output, scalar_body);
         }
+        return Ok(());
     }
 
-    let mask_ref = null_mask.expect("weibull_cdf: null_count > 0 requires null_mask");
-    if is_simd_aligned(x) {
-        let (data, out_mask) =
-            masked_univariate_kernel_f64_simd::<N, _, _>(x, mask_ref, simd_body, scalar_body);
-        Ok(FloatArray {
-            data: data.into(),
-            null_mask: Some(out_mask),
-        })
+    let mask_ref = null_mask.expect("weibull_quantile: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    if is_simd_aligned(p) {
+        masked_univariate_kernel_f64_simd_to::<N, _, _>(
+            p,
+            mask_ref,
+            output,
+            &mut out_mask,
+            simd_body,
+            scalar_body,
+        );
     } else {
-        let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-        Ok(FloatArray {
-            data: data.into(),
-            null_mask: Some(out_mask),
-        })
+        masked_univariate_kernel_f64_std_to(p, mask_ref, output, &mut out_mask, scalar_body);
     }
+
+    Ok(())
 }
 
 /// **Weibull Distribution Quantile Function** - *SIMD-Accelerated Reliability Quantile*
@@ -302,81 +413,15 @@ pub fn weibull_quantile_simd(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    if !(shape > 0.0 && shape.is_finite()) || !(scale > 0.0 && scale.is_finite()) {
-        return Err(KernelError::InvalidArguments(
-            "weibull_quantile: invalid shape or scale".into(),
-        ));
-    }
-    if p.is_empty() {
+    let len = p.len();
+    if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    const N: usize = W64;
-    let inv_k = 1.0 / shape;
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    let scalar_body = move |pi: f64| -> f64 {
-        if 0.0 < pi && pi < 1.0 {
-            scale * (-(1.0 - pi).ln()).powf(inv_k)
-        } else if pi == 0.0 {
-            0.0
-        } else if pi == 1.0 {
-            f64::INFINITY
-        } else {
-            f64::NAN
-        }
-    };
+    weibull_quantile_simd_to(p, shape, scale, out.as_mut_slice(), null_mask, null_count)?;
 
-    let simd_body = {
-        let invk_v = Simd::<f64, N>::splat(inv_k);
-        let scale_v = Simd::<f64, N>::splat(scale);
-        let zero_v = Simd::<f64, N>::splat(0.0);
-        let one_v = Simd::<f64, N>::splat(1.0);
-        let nan_v = Simd::<f64, N>::splat(f64::NAN);
-        move |p_v: Simd<f64, N>| {
-            let is_zero = p_v.simd_eq(zero_v);
-            let is_one = p_v.simd_eq(one_v);
-            let is_valid = p_v.simd_gt(zero_v) & p_v.simd_lt(one_v) & p_v.is_finite();
-            let t = -(one_v - p_v).ln();
-            let q_v = scale_v * (invk_v * t.ln()).exp();
-            let inf_v = Simd::<f64, N>::splat(f64::INFINITY);
-            is_zero.select(zero_v, is_one.select(inf_v, is_valid.select(q_v, nan_v)))
-        }
-    };
-
-    if !has_nulls(null_count, null_mask) {
-        if is_simd_aligned(p) {
-            let (data, mask) = dense_univariate_kernel_f64_simd::<N, _, _>(
-                p,
-                null_mask.is_some(),
-                simd_body,
-                scalar_body,
-            );
-            return Ok(FloatArray {
-                data: data.into(),
-                null_mask: mask,
-            });
-        } else {
-            let (data, mask) = dense_univariate_kernel_f64_std(p, null_mask.is_some(), scalar_body);
-            return Ok(FloatArray {
-                data: data.into(),
-                null_mask: mask,
-            });
-        }
-    }
-
-    let mask_ref = null_mask.expect("weibull_quantile: null_count > 0 requires null_mask");
-    if is_simd_aligned(p) {
-        let (data, out_mask) =
-            masked_univariate_kernel_f64_simd::<N, _, _>(p, mask_ref, simd_body, scalar_body);
-        Ok(FloatArray {
-            data: data.into(),
-            null_mask: Some(out_mask),
-        })
-    } else {
-        let (data, out_mask) = masked_univariate_kernel_f64_std(p, mask_ref, scalar_body);
-        Ok(FloatArray {
-            data: data.into(),
-            null_mask: Some(out_mask),
-        })
-    }
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

@@ -23,6 +23,191 @@ use minarrow::{Bitmask, FloatArray, Vec64, enums::error::KernelError, utils::is_
 use crate::utils::{bitmask_to_simd_mask, simd_mask_to_bitmask};
 use crate::utils::{has_nulls, write_global_bitmask_block};
 
+/// Geometric PMF SIMD (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn geometric_pmf_simd_to(
+    k: &[u64],
+    p: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    // 1) Parameter check (allow p == 1.0 for the degenerate case)
+    if !(p > 0.0 && p <= 1.0) || !p.is_finite() {
+        return Err(KernelError::InvalidArguments(
+            "geometric_pmf: p must be in (0,1] and finite".into(),
+        ));
+    }
+    // 2) Empty input
+    let len = k.len();
+    if len == 0 {
+        return Ok(());
+    }
+
+    // ----- Degenerate fast path: p == 1  ->  PMF(k) = 1_{k==1} -----
+    if p == 1.0 {
+        if !has_nulls(null_count, null_mask) {
+            if is_simd_aligned(k) {
+                let one = Simd::<u64, N>::splat(1);
+                let mut i = 0;
+                while i + N <= len {
+                    let ku = Simd::<u64, N>::from_slice(&k[i..i + N]);
+                    let is_one = ku.simd_eq(one);
+                    let vals =
+                        is_one.select(Simd::<f64, N>::splat(1.0), Simd::<f64, N>::splat(0.0));
+                    output[i..i + N].copy_from_slice(vals.as_array());
+                    i += N;
+                }
+                for idx in i..len {
+                    output[idx] = if k[idx] == 1 { 1.0 } else { 0.0 };
+                }
+            } else {
+                for (i, &ki) in k.iter().enumerate() {
+                    output[i] = if ki == 1 { 1.0 } else { 0.0 };
+                }
+            }
+            return Ok(());
+        }
+
+        // masked path
+        let mask = null_mask.expect("null_count > 0 requires null_mask");
+        let mut out_mask = mask.clone();
+        if is_simd_aligned(k) {
+            let mask_bytes = mask.as_bytes();
+            let one = Simd::<u64, N>::splat(1);
+            let mut i = 0;
+            while i + N <= len {
+                let lane_mask: Mask<i64, N> = bitmask_to_simd_mask::<N, i64>(mask_bytes, i, len);
+                let ku = Simd::<u64, N>::from_slice(&k[i..i + N]);
+                let masked_ku = lane_mask.select(ku, Simd::<u64, N>::splat(0));
+                let is_one = masked_ku.simd_eq(one);
+                let vals = is_one.select(Simd::<f64, N>::splat(1.0), Simd::<f64, N>::splat(0.0));
+                let res = lane_mask.select(vals, Simd::<f64, N>::splat(f64::NAN));
+                output[i..i + N].copy_from_slice(res.as_array());
+
+                let bits = simd_mask_to_bitmask::<N, i64>(lane_mask, N);
+                write_global_bitmask_block(&mut out_mask, &bits, i, N);
+                i += N;
+            }
+            for idx in i..len {
+                if !unsafe { mask.get_unchecked(idx) } {
+                    output[idx] = f64::NAN;
+                    unsafe { out_mask.set_unchecked(idx, false) }
+                } else {
+                    output[idx] = if k[idx] == 1 { 1.0 } else { 0.0 };
+                    unsafe { out_mask.set_unchecked(idx, true) }
+                }
+            }
+        } else {
+            for idx in 0..len {
+                if !mask.get(idx) {
+                    output[idx] = f64::NAN;
+                    unsafe { out_mask.set_unchecked(idx, false) }
+                } else {
+                    output[idx] = if k[idx] == 1 { 1.0 } else { 0.0 };
+                    unsafe { out_mask.set_unchecked(idx, true) }
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    // ----- Regular path: 0 < p < 1 -----
+    let log1mp = (1.0 - p).ln();
+    let p_v = Simd::<f64, N>::splat(p);
+    let log1mp_v = Simd::<f64, N>::splat(log1mp);
+
+    let scalar_body = |ki: u64| -> f64 {
+        if ki == 0 {
+            0.0
+        } else {
+            (((ki as f64) - 1.0) * log1mp).exp() * p
+        }
+    };
+
+    if !has_nulls(null_count, null_mask) {
+        if is_simd_aligned(k) {
+            let zero_u = Simd::<u64, N>::splat(0);
+            let one_f = Simd::<f64, N>::splat(1.0);
+            let zero_f = Simd::<f64, N>::splat(0.0);
+            let mut i = 0;
+            while i + N <= len {
+                let k_u = Simd::<u64, N>::from_slice(&k[i..i + N]);
+                let is_zero = k_u.simd_eq(zero_u);
+                let kf = k_u.cast::<f64>();
+                let pmf_nonzero = ((kf - one_f) * log1mp_v).exp() * p_v;
+                let pmf = is_zero.select(zero_f, pmf_nonzero);
+                output[i..i + N].copy_from_slice(pmf.as_array());
+                i += N;
+            }
+            for idx in i..len {
+                output[idx] = scalar_body(k[idx]);
+            }
+            return Ok(());
+        }
+        for (i, &ki) in k.iter().enumerate() {
+            output[i] = scalar_body(ki);
+        }
+        return Ok(());
+    }
+
+    // masked
+    let mask = null_mask.expect("null_count > 0 requires null_mask");
+    let mut out_mask = mask.clone();
+
+    if is_simd_aligned(k) {
+        let one_f = Simd::<f64, N>::splat(1.0);
+        let zero_f = Simd::<f64, N>::splat(0.0);
+        let mask_bytes = mask.as_bytes();
+        let mut i = 0;
+        while i + N <= len {
+            let lane_mask: Mask<i64, N> = bitmask_to_simd_mask::<N, i64>(mask_bytes, i, len);
+            let mut k_arr = [0u64; N];
+            for j in 0..N {
+                k_arr[j] = if unsafe { lane_mask.test_unchecked(j) } {
+                    k[i + j]
+                } else {
+                    0
+                };
+            }
+            let k_u = Simd::<u64, N>::from_array(k_arr);
+            let is_zero = k_u.simd_eq(Simd::<u64, N>::splat(0));
+            let kf = k_u.cast::<f64>();
+            let pmf_nonzero = ((kf - one_f) * log1mp_v).exp() * p_v;
+            let pmf = is_zero.select(zero_f, pmf_nonzero);
+            let res_v = lane_mask.select(pmf, Simd::<f64, N>::splat(f64::NAN));
+            output[i..i + N].copy_from_slice(res_v.as_array());
+
+            let bits = simd_mask_to_bitmask::<N, i64>(lane_mask, N);
+            write_global_bitmask_block(&mut out_mask, &bits, i, N);
+            i += N;
+        }
+        for idx in i..len {
+            if !unsafe { mask.get_unchecked(idx) } {
+                output[idx] = f64::NAN;
+                unsafe { out_mask.set_unchecked(idx, false) }
+            } else {
+                output[idx] = scalar_body(k[idx]);
+                unsafe { out_mask.set_unchecked(idx, true) }
+            }
+        }
+        return Ok(());
+    }
+
+    for idx in 0..len {
+        if !mask.get(idx) {
+            output[idx] = f64::NAN;
+            unsafe { out_mask.set_unchecked(idx, false) }
+        } else {
+            output[idx] = scalar_body(k[idx]);
+            unsafe { out_mask.set_unchecked(idx, true) }
+        }
+    }
+    Ok(())
+}
+
 /// SIMD-accelerated implementation of geometric distribution probability mass function.
 ///
 /// Computes the probability mass function (PMF) of the geometric distribution following
@@ -56,59 +241,80 @@ pub fn geometric_pmf_simd(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // 1) Parameter check (allow p == 1.0 for the degenerate case)
-    if !(p > 0.0 && p <= 1.0) || !p.is_finite() {
-        return Err(KernelError::InvalidArguments(
-            "geometric_pmf: p must be in (0,1] and finite".into(),
-        ));
-    }
-    // 2) Empty input
     let len = k.len();
     if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    // ----- Degenerate fast path: p == 1  ->  PMF(k) = 1_{k==1} -----
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    geometric_pmf_simd_to(k, p, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Geometric CDF SIMD (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn geometric_cdf_simd_to(
+    k: &[u64],
+    p: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    if !(p > 0.0 && p <= 1.0) || !p.is_finite() {
+        return Err(KernelError::InvalidArguments(
+            "geometric_cdf: p must be in (0,1] and finite".into(),
+        ));
+    }
+    let len = k.len();
+    if len == 0 {
+        return Ok(());
+    }
+
+    // Degenerate p == 1 -> CDF(k) = 0 if k==0 else 1
     if p == 1.0 {
-        let mut out = Vec64::with_capacity(len);
         if !has_nulls(null_count, null_mask) {
             if is_simd_aligned(k) {
-                let one = Simd::<u64, N>::splat(1);
+                let zero_u = Simd::<u64, N>::splat(0);
                 let mut i = 0;
                 while i + N <= len {
                     let ku = Simd::<u64, N>::from_slice(&k[i..i + N]);
-                    let is_one = ku.simd_eq(one);
+                    let is_zero = ku.simd_eq(zero_u);
                     let vals =
-                        is_one.select(Simd::<f64, N>::splat(1.0), Simd::<f64, N>::splat(0.0));
-                    out.extend_from_slice(vals.as_array());
+                        is_zero.select(Simd::<f64, N>::splat(0.0), Simd::<f64, N>::splat(1.0));
+                    output[i..i + N].copy_from_slice(vals.as_array());
                     i += N;
                 }
-                for &ki in &k[i..] {
-                    out.push(if ki == 1 { 1.0 } else { 0.0 });
+                for idx in i..len {
+                    output[idx] = if k[idx] == 0 { 0.0 } else { 1.0 };
                 }
             } else {
-                for &ki in k {
-                    out.push(if ki == 1 { 1.0 } else { 0.0 });
+                for (i, &ki) in k.iter().enumerate() {
+                    output[i] = if ki == 0 { 0.0 } else { 1.0 };
                 }
             }
-            return Ok(FloatArray::from_vec64(out, None));
+            return Ok(());
         }
 
-        // masked path
+        // masked
         let mask = null_mask.expect("null_count > 0 requires null_mask");
         let mut out_mask = mask.clone();
         if is_simd_aligned(k) {
             let mask_bytes = mask.as_bytes();
-            let one = Simd::<u64, N>::splat(1);
+            let zero_u = Simd::<u64, N>::splat(0);
             let mut i = 0;
             while i + N <= len {
                 let lane_mask: Mask<i64, N> = bitmask_to_simd_mask::<N, i64>(mask_bytes, i, len);
                 let ku = Simd::<u64, N>::from_slice(&k[i..i + N]);
                 let masked_ku = lane_mask.select(ku, Simd::<u64, N>::splat(0));
-                let is_one = masked_ku.simd_eq(one);
-                let vals = is_one.select(Simd::<f64, N>::splat(1.0), Simd::<f64, N>::splat(0.0));
+                let is_zero = masked_ku.simd_eq(zero_u);
+                let vals = is_zero.select(Simd::<f64, N>::splat(0.0), Simd::<f64, N>::splat(1.0));
                 let res = lane_mask.select(vals, Simd::<f64, N>::splat(f64::NAN));
-                out.extend_from_slice(res.as_array());
+                output[i..i + N].copy_from_slice(res.as_array());
 
                 let bits = simd_mask_to_bitmask::<N, i64>(lane_mask, N);
                 write_global_bitmask_block(&mut out_mask, &bits, i, N);
@@ -116,130 +322,134 @@ pub fn geometric_pmf_simd(
             }
             for idx in i..len {
                 if !unsafe { mask.get_unchecked(idx) } {
-                    out.push(f64::NAN);
-                    unsafe { out_mask.set_unchecked(idx, false) }
+                    output[idx] = f64::NAN;
+                    unsafe { out_mask.set_unchecked(idx, false) };
                 } else {
-                    out.push(if k[idx] == 1 { 1.0 } else { 0.0 });
-                    unsafe { out_mask.set_unchecked(idx, true) }
+                    output[idx] = if k[idx] == 0 { 0.0 } else { 1.0 };
+                    unsafe { out_mask.set_unchecked(idx, true) };
                 }
             }
         } else {
             for idx in 0..len {
                 if !mask.get(idx) {
-                    out.push(f64::NAN);
-                    unsafe { out_mask.set_unchecked(idx, false) }
+                    output[idx] = f64::NAN;
+                    unsafe { out_mask.set_unchecked(idx, false) };
                 } else {
-                    out.push(if k[idx] == 1 { 1.0 } else { 0.0 });
-                    unsafe { out_mask.set_unchecked(idx, true) }
+                    output[idx] = if k[idx] == 0 { 0.0 } else { 1.0 };
+                    unsafe { out_mask.set_unchecked(idx, true) };
                 }
             }
         }
-        return Ok(FloatArray {
-            data: out.into(),
-            null_mask: Some(out_mask),
-        });
+        return Ok(());
     }
 
-    // ----- Regular path: 0 < p < 1 -----
+    // 0 < p < 1
     let log1mp = (1.0 - p).ln();
-    let p_v = Simd::<f64, N>::splat(p);
-    let log1mp_v = Simd::<f64, N>::splat(log1mp);
-
-    let scalar_body = |ki: u64| -> f64 {
-        if ki == 0 {
-            0.0
-        } else {
-            (((ki as f64) - 1.0) * log1mp).exp() * p
-        }
-    };
 
     if !has_nulls(null_count, null_mask) {
-        let mut out = Vec64::with_capacity(len);
         if is_simd_aligned(k) {
+            let log1mp_v = Simd::<f64, N>::splat(log1mp);
+            let one_v = Simd::<f64, N>::splat(1.0);
             let zero_u = Simd::<u64, N>::splat(0);
-            let one_f = Simd::<f64, N>::splat(1.0);
-            let zero_f = Simd::<f64, N>::splat(0.0);
             let mut i = 0;
             while i + N <= len {
                 let k_u = Simd::<u64, N>::from_slice(&k[i..i + N]);
-                let is_zero = k_u.simd_eq(zero_u);
                 let kf = k_u.cast::<f64>();
-                let pmf_nonzero = ((kf - one_f) * log1mp_v).exp() * p_v;
-                let pmf = is_zero.select(zero_f, pmf_nonzero);
-                out.extend_from_slice(pmf.as_array());
+                let is_zero = k_u.simd_eq(zero_u);
+                let cdf_nonzero = one_v - (kf * log1mp_v).exp();
+                let cdf_v = is_zero.select(Simd::<f64, N>::splat(0.0), cdf_nonzero);
+                output[i..i + N].copy_from_slice(cdf_v.as_array());
                 i += N;
             }
-            for &ki in &k[i..] {
-                out.push(scalar_body(ki));
+            for idx in i..len {
+                let ki = k[idx];
+                output[idx] = if ki == 0 {
+                    0.0
+                } else {
+                    1.0 - ((ki as f64) * log1mp).exp()
+                };
             }
-            return Ok(FloatArray::from_vec64(out, None));
+            return Ok(());
         }
-        for &ki in k {
-            out.push(scalar_body(ki));
+        for (i, &ki) in k.iter().enumerate() {
+            output[i] = if ki == 0 {
+                0.0
+            } else {
+                1.0 - ((ki as f64) * log1mp).exp()
+            };
         }
-        return Ok(FloatArray::from_vec64(out, None));
+        return Ok(());
     }
 
-    // masked
+    // masked path
     let mask = null_mask.expect("null_count > 0 requires null_mask");
-    let mut out = Vec64::with_capacity(len);
     let mut out_mask = mask.clone();
 
     if is_simd_aligned(k) {
-        let one_f = Simd::<f64, N>::splat(1.0);
-        let zero_f = Simd::<f64, N>::splat(0.0);
+        let log1mp_v = Simd::<f64, N>::splat(log1mp);
+        let one_v = Simd::<f64, N>::splat(1.0);
         let mask_bytes = mask.as_bytes();
+        let zero_u = Simd::<u64, N>::splat(0);
+
         let mut i = 0;
         while i + N <= len {
             let lane_mask: Mask<i64, N> = bitmask_to_simd_mask::<N, i64>(mask_bytes, i, len);
             let mut k_arr = [0u64; N];
             for j in 0..N {
+                let idx = i + j;
                 k_arr[j] = if unsafe { lane_mask.test_unchecked(j) } {
-                    k[i + j]
+                    k[idx]
                 } else {
                     0
                 };
             }
             let k_u = Simd::<u64, N>::from_array(k_arr);
-            let is_zero = k_u.simd_eq(Simd::<u64, N>::splat(0));
             let kf = k_u.cast::<f64>();
-            let pmf_nonzero = ((kf - one_f) * log1mp_v).exp() * p_v;
-            let pmf = is_zero.select(zero_f, pmf_nonzero);
-            let res_v = lane_mask.select(pmf, Simd::<f64, N>::splat(f64::NAN));
-            out.extend_from_slice(res_v.as_array());
+            let is_zero = k_u.simd_eq(zero_u);
+            let cdf_nonzero = one_v - (kf * log1mp_v).exp();
+            let cdf_v = is_zero.select(Simd::<f64, N>::splat(0.0), cdf_nonzero);
+
+            let result = lane_mask.select(cdf_v, Simd::<f64, N>::splat(f64::NAN));
+            output[i..i + N].copy_from_slice(result.as_array());
 
             let bits = simd_mask_to_bitmask::<N, i64>(lane_mask, N);
             write_global_bitmask_block(&mut out_mask, &bits, i, N);
+
             i += N;
         }
         for idx in i..len {
             if !unsafe { mask.get_unchecked(idx) } {
-                out.push(f64::NAN);
-                unsafe { out_mask.set_unchecked(idx, false) }
+                output[idx] = f64::NAN;
+                unsafe { out_mask.set_unchecked(idx, false) };
             } else {
-                out.push(scalar_body(k[idx]));
-                unsafe { out_mask.set_unchecked(idx, true) }
+                let ki = k[idx];
+                output[idx] = if ki == 0 {
+                    0.0
+                } else {
+                    1.0 - ((ki as f64) * log1mp).exp()
+                };
+                unsafe { out_mask.set_unchecked(idx, true) };
             }
         }
-        return Ok(FloatArray {
-            data: out.into(),
-            null_mask: Some(out_mask),
-        });
+        return Ok(());
     }
 
     for idx in 0..len {
         if !mask.get(idx) {
-            out.push(f64::NAN);
-            unsafe { out_mask.set_unchecked(idx, false) }
+            output[idx] = f64::NAN;
+            unsafe { out_mask.set_unchecked(idx, false) };
         } else {
-            out.push(scalar_body(k[idx]));
-            unsafe { out_mask.set_unchecked(idx, true) }
+            let ki = k[idx];
+            output[idx] = if ki == 0 {
+                0.0
+            } else {
+                1.0 - ((ki as f64) * log1mp).exp()
+            };
+            unsafe { out_mask.set_unchecked(idx, true) };
         }
     }
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(out_mask),
-    })
+
+    Ok(())
 }
 
 /// SIMD-accelerated implementation of geometric distribution cumulative distribution function.
@@ -275,247 +485,30 @@ pub fn geometric_cdf_simd(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    if !(p > 0.0 && p <= 1.0) || !p.is_finite() {
-        return Err(KernelError::InvalidArguments(
-            "geometric_cdf: p must be in [0,1] and finite".into(),
-        ));
-    }
     let len = k.len();
     if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    // Degenerate p == 1 -> CDF(k) = 0 if k==0 else 1
-    if p == 1.0 {
-        let mut out = Vec64::with_capacity(len);
-        if !has_nulls(null_count, null_mask) {
-            if is_simd_aligned(k) {
-                let zero_u = Simd::<u64, N>::splat(0);
-                let mut i = 0;
-                while i + N <= len {
-                    let ku = Simd::<u64, N>::from_slice(&k[i..i + N]);
-                    let is_zero = ku.simd_eq(zero_u);
-                    let vals =
-                        is_zero.select(Simd::<f64, N>::splat(0.0), Simd::<f64, N>::splat(1.0));
-                    out.extend_from_slice(vals.as_array());
-                    i += N;
-                }
-                for &ki in &k[i..] {
-                    out.push(if ki == 0 { 0.0 } else { 1.0 });
-                }
-            } else {
-                for &ki in k {
-                    out.push(if ki == 0 { 0.0 } else { 1.0 });
-                }
-            }
-            return Ok(FloatArray::from_vec64(out, None));
-        }
-
-        // masked
-        let mask = null_mask.expect("null_count > 0 requires null_mask");
-        let mut out_mask = mask.clone();
-        if is_simd_aligned(k) {
-            let mask_bytes = mask.as_bytes();
-            let zero_u = Simd::<u64, N>::splat(0);
-            let mut i = 0;
-            while i + N <= len {
-                let lane_mask: Mask<i64, N> = bitmask_to_simd_mask::<N, i64>(mask_bytes, i, len);
-                let ku = Simd::<u64, N>::from_slice(&k[i..i + N]);
-                let masked_ku = lane_mask.select(ku, Simd::<u64, N>::splat(0));
-                let is_zero = masked_ku.simd_eq(zero_u);
-                let vals = is_zero.select(Simd::<f64, N>::splat(0.0), Simd::<f64, N>::splat(1.0));
-                let res = lane_mask.select(vals, Simd::<f64, N>::splat(f64::NAN));
-                out.extend_from_slice(res.as_array());
-
-                let bits = simd_mask_to_bitmask::<N, i64>(lane_mask, N);
-                write_global_bitmask_block(&mut out_mask, &bits, i, N);
-                i += N;
-            }
-            for idx in i..len {
-                if !unsafe { mask.get_unchecked(idx) } {
-                    out.push(f64::NAN);
-                    unsafe { out_mask.set_unchecked(idx, false) };
-                } else {
-                    out.push(if k[idx] == 0 { 0.0 } else { 1.0 });
-                    unsafe { out_mask.set_unchecked(idx, true) };
-                }
-            }
-        } else {
-            for idx in 0..len {
-                if !mask.get(idx) {
-                    out.push(f64::NAN);
-                    unsafe { out_mask.set_unchecked(idx, false) };
-                } else {
-                    out.push(if k[idx] == 0 { 0.0 } else { 1.0 });
-                    unsafe { out_mask.set_unchecked(idx, true) };
-                }
-            }
-        }
-        return Ok(FloatArray {
-            data: out.into(),
-            null_mask: Some(out_mask),
-        });
-    }
-
-    // 0 < p < 1
-    let log1mp = (1.0 - p).ln();
-
-    if !has_nulls(null_count, null_mask) {
-        let mut out = Vec64::with_capacity(len);
-        if is_simd_aligned(k) {
-            let log1mp_v = Simd::<f64, N>::splat(log1mp);
-            let one_v = Simd::<f64, N>::splat(1.0);
-            let zero_u = Simd::<u64, N>::splat(0);
-            let mut i = 0;
-            while i + N <= len {
-                let k_u = Simd::<u64, N>::from_slice(&k[i..i + N]);
-                let kf = k_u.cast::<f64>();
-                let is_zero = k_u.simd_eq(zero_u);
-                let cdf_nonzero = one_v - (kf * log1mp_v).exp();
-                let cdf_v = is_zero.select(Simd::<f64, N>::splat(0.0), cdf_nonzero);
-                out.extend_from_slice(cdf_v.as_array());
-                i += N;
-            }
-            for &ki in &k[i..] {
-                if ki == 0 {
-                    out.push(0.0);
-                } else {
-                    out.push(1.0 - ((ki as f64) * log1mp).exp());
-                }
-            }
-            return Ok(FloatArray::from_vec64(out, None));
-        }
-        for &ki in k {
-            if ki == 0 {
-                out.push(0.0);
-            } else {
-                out.push(1.0 - ((ki as f64) * log1mp).exp());
-            }
-        }
-        return Ok(FloatArray::from_vec64(out, None));
-    }
-
-    // masked path
-    let mask = null_mask.expect("null_count > 0 requires null_mask");
     let mut out = Vec64::with_capacity(len);
-    let mut out_mask = mask.clone();
+    unsafe { out.set_len(len) };
 
-    if is_simd_aligned(k) {
-        let log1mp_v = Simd::<f64, N>::splat(log1mp);
-        let one_v = Simd::<f64, N>::splat(1.0);
-        let mask_bytes = mask.as_bytes();
-        let zero_u = Simd::<u64, N>::splat(0);
+    geometric_cdf_simd_to(k, p, out.as_mut_slice(), null_mask, null_count)?;
 
-        let mut i = 0;
-        while i + N <= len {
-            let lane_mask: Mask<i64, N> = bitmask_to_simd_mask::<N, i64>(mask_bytes, i, len);
-            let mut k_arr = [0u64; N];
-            for j in 0..N {
-                let idx = i + j;
-                k_arr[j] = if unsafe { lane_mask.test_unchecked(j) } {
-                    k[idx]
-                } else {
-                    0
-                };
-            }
-            let k_u = Simd::<u64, N>::from_array(k_arr);
-            let kf = k_u.cast::<f64>();
-            let is_zero = k_u.simd_eq(zero_u);
-            let cdf_nonzero = one_v - (kf * log1mp_v).exp();
-            let cdf_v = is_zero.select(Simd::<f64, N>::splat(0.0), cdf_nonzero);
-
-            let result = lane_mask.select(cdf_v, Simd::<f64, N>::splat(f64::NAN));
-            out.extend_from_slice(result.as_array());
-
-            let bits = simd_mask_to_bitmask::<N, i64>(lane_mask, N);
-            write_global_bitmask_block(&mut out_mask, &bits, i, N);
-
-            i += N;
-        }
-        for idx in i..len {
-            if !unsafe { mask.get_unchecked(idx) } {
-                out.push(f64::NAN);
-                unsafe { out_mask.set_unchecked(idx, false) };
-            } else {
-                let ki = k[idx];
-                let c = if ki == 0 {
-                    0.0
-                } else {
-                    1.0 - ((ki as f64) * log1mp).exp()
-                };
-                out.push(c);
-                unsafe { out_mask.set_unchecked(idx, true) };
-            }
-        }
-        return Ok(FloatArray {
-            data: out.into(),
-            null_mask: Some(out_mask),
-        });
-    }
-
-    for idx in 0..len {
-        if !mask.get(idx) {
-            out.push(f64::NAN);
-            unsafe { out_mask.set_unchecked(idx, false) };
-        } else {
-            let ki = k[idx];
-            let c = if ki == 0 {
-                0.0
-            } else {
-                1.0 - ((ki as f64) * log1mp).exp()
-            };
-            out.push(c);
-            unsafe { out_mask.set_unchecked(idx, true) };
-        }
-    }
-
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }
 
-/// SIMD-accelerated implementation of geometric distribution quantile function.
+/// Geometric quantile SIMD (zero-allocation variant).
 ///
-/// Computes the quantile function (inverse CDF) of the geometric distribution
-/// following SciPy's convention using vectorised SIMD operations for enhanced
-/// performance on inverse probability computations.
-///
-/// ## Parameters
-/// - `pv`: Input probability values where quantiles should be evaluated (domain: q ∈ [0, 1])
-/// - `p_succ`: Success probability parameter ∈ (0, 1] controlling distribution
-/// - `null_mask`: Optional bitmask indicating null values in input
-/// - `null_count`: Optional count of null values for optimisation
-///
-/// ## Returns
-/// `Result<FloatArray<f64>, KernelError>` containing:
-/// - **Success**: FloatArray with computed quantile values and appropriate null mask
-/// - **Error**: KernelError::InvalidArguments for invalid success probability parameter
-///
-/// ## Special Cases and Boundary Conditions
-/// - **q = 0**: Returns 1 (minimum trials for any success probability)
-/// - **q = 1**: Returns +∞ (infinite trials needed for certainty)
-/// - **p = 1.0**: Degenerate distribution (Q(q<1) = 1, Q(1) = +∞)
-/// - **Invalid q**: Returns NaN for q ∉ [0, 1] or non-finite q
-/// - **Invalid parameters**: Returns error for p ∉ (0, 1] or non-finite p
-///
-/// ## Errors
-/// - `KernelError::InvalidArguments`: When p_succ ∉ (0, 1] or p_succ is non-finite
-///
-/// ## Example Usage
-/// ```rust,ignore
-/// let q = [0.0, 0.25, 0.5, 0.75, 1.0];  // probability values
-/// let p_succ = 0.3;                      // success probability
-/// let result = geometric_quantile_simd(&q, p_succ, None, None)?;
-/// // Returns quantiles: [1.0, 1.0, 2.0, 5.0, ∞]
-/// ```
+/// Writes directly to caller-provided output buffer.
 #[inline(always)]
-pub fn geometric_quantile_simd(
+pub fn geometric_quantile_simd_to(
     pv: &[f64],
     p_succ: f64,
+    output: &mut [f64],
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Result<FloatArray<f64>, KernelError> {
+) -> Result<(), KernelError> {
     if !(p_succ > 0.0 && p_succ.is_finite() && p_succ <= 1.0) {
         return Err(KernelError::InvalidArguments(
             "geometric_quantile: p_succ must be in (0,1] and finite".into(),
@@ -523,7 +516,7 @@ pub fn geometric_quantile_simd(
     }
     let len = pv.len();
     if len == 0 {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     // scalar kernel for tails & unaligned
@@ -544,10 +537,8 @@ pub fn geometric_quantile_simd(
         ((1.0 - q).ln() / log1mp).ceil()
     };
 
-    // dense path - np nulls
+    // dense path - no nulls
     if !has_nulls(null_count, null_mask) {
-        let mut out = Vec64::with_capacity(len);
-
         if is_simd_aligned(pv) {
             let one = Simd::<f64, N>::splat(1.0);
             let zero = Simd::<f64, N>::splat(0.0);
@@ -584,26 +575,25 @@ pub fn geometric_quantile_simd(
                 // mask invalid domain to NaN
                 rv = oob.select(Simd::<f64, N>::splat(f64::NAN), rv);
 
-                out.extend_from_slice(rv.as_array());
+                output[i..i + N].copy_from_slice(rv.as_array());
                 i += N;
             }
             // scalar tail
-            for &q in &pv[i..] {
-                out.push(scalar_body(q));
+            for idx in i..len {
+                output[idx] = scalar_body(pv[idx]);
             }
-            return Ok(FloatArray::from_vec64(out, None));
+            return Ok(());
         }
 
         // unaligned -> scalar
-        for &q in pv {
-            out.push(scalar_body(q));
+        for (i, &q) in pv.iter().enumerate() {
+            output[i] = scalar_body(q);
         }
-        return Ok(FloatArray::from_vec64(out, None));
+        return Ok(());
     }
 
     // masked path
     let mask_ref = null_mask.expect("null_count > 0 requires null_mask");
-    let mut out = Vec64::with_capacity(len);
     let mut out_mask = mask_ref.clone();
 
     if is_simd_aligned(pv) {
@@ -654,7 +644,7 @@ pub fn geometric_quantile_simd(
 
             // apply null mask: null lanes -> NaN, propagate mask unchanged
             let res_v = lane_mask.select(rv, Simd::<f64, N>::splat(f64::NAN));
-            out.extend_from_slice(res_v.as_array());
+            output[i..i + N].copy_from_slice(res_v.as_array());
 
             // keep the input null mask bits verbatim
             let bits = simd_mask_to_bitmask::<N, i64>(lane_mask, N);
@@ -665,33 +655,81 @@ pub fn geometric_quantile_simd(
         // scalar tail
         for idx in i..len {
             if !unsafe { mask_ref.get_unchecked(idx) } {
-                out.push(f64::NAN);
+                output[idx] = f64::NAN;
                 unsafe { out_mask.set_unchecked(idx, false) };
             } else {
-                out.push(scalar_body(pv[idx]));
+                output[idx] = scalar_body(pv[idx]);
                 unsafe { out_mask.set_unchecked(idx, true) };
             }
         }
 
-        return Ok(FloatArray {
-            data: out.into(),
-            null_mask: Some(out_mask),
-        });
+        return Ok(());
     }
 
     // unaligned masked -> scalar per element
     for idx in 0..len {
         if !mask_ref.get(idx) {
-            out.push(f64::NAN);
+            output[idx] = f64::NAN;
             unsafe { out_mask.set_unchecked(idx, false) };
         } else {
-            out.push(scalar_body(pv[idx]));
+            output[idx] = scalar_body(pv[idx]);
             unsafe { out_mask.set_unchecked(idx, true) };
         }
     }
 
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(())
+}
+
+/// SIMD-accelerated implementation of geometric distribution quantile function.
+///
+/// Computes the quantile function (inverse CDF) of the geometric distribution
+/// following SciPy's convention using vectorised SIMD operations for enhanced
+/// performance on inverse probability computations.
+///
+/// ## Parameters
+/// - `pv`: Input probability values where quantiles should be evaluated (domain: q ∈ [0, 1])
+/// - `p_succ`: Success probability parameter ∈ (0, 1] controlling distribution
+/// - `null_mask`: Optional bitmask indicating null values in input
+/// - `null_count`: Optional count of null values for optimisation
+///
+/// ## Returns
+/// `Result<FloatArray<f64>, KernelError>` containing:
+/// - **Success**: FloatArray with computed quantile values and appropriate null mask
+/// - **Error**: KernelError::InvalidArguments for invalid success probability parameter
+///
+/// ## Special Cases and Boundary Conditions
+/// - **q = 0**: Returns 1 (minimum trials for any success probability)
+/// - **q = 1**: Returns +∞ (infinite trials needed for certainty)
+/// - **p = 1.0**: Degenerate distribution (Q(q<1) = 1, Q(1) = +∞)
+/// - **Invalid q**: Returns NaN for q ∉ [0, 1] or non-finite q
+/// - **Invalid parameters**: Returns error for p ∉ (0, 1] or non-finite p
+///
+/// ## Errors
+/// - `KernelError::InvalidArguments`: When p_succ ∉ (0, 1] or p_succ is non-finite
+///
+/// ## Example Usage
+/// ```rust,ignore
+/// let q = [0.0, 0.25, 0.5, 0.75, 1.0];  // probability values
+/// let p_succ = 0.3;                      // success probability
+/// let result = geometric_quantile_simd(&q, p_succ, None, None)?;
+/// // Returns quantiles: [1.0, 1.0, 2.0, 5.0, ∞]
+/// ```
+#[inline(always)]
+pub fn geometric_quantile_simd(
+    pv: &[f64],
+    p_succ: f64,
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<FloatArray<f64>, KernelError> {
+    let len = pv.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    geometric_quantile_simd_to(pv, p_succ, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

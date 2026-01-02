@@ -40,6 +40,72 @@ mod std;
 use minarrow::{Bitmask, FloatArray};
 
 use minarrow::enums::error::KernelError;
+
+/// Geometric PMF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn geometric_pmf_to(
+    k: &[u64],
+    p: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::geometric_pmf_simd_to(k, p, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::geometric_pmf_std_to(k, p, output, null_mask, null_count)
+    }
+}
+
+/// Geometric CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn geometric_cdf_to(
+    k: &[u64],
+    p: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::geometric_cdf_simd_to(k, p, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::geometric_cdf_std_to(k, p, output, null_mask, null_count)
+    }
+}
+
+/// Geometric quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn geometric_quantile_to(
+    pv: &[f64],
+    p_succ: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::geometric_quantile_simd_to(pv, p_succ, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::geometric_quantile_std_to(pv, p_succ, output, null_mask, null_count)
+    }
+}
 /// Compute the probability mass function (PMF) for the geometric distribution.
 ///
 /// The geometric distribution models the number of trials needed to achieve the first success

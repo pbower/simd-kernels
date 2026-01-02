@@ -20,16 +20,88 @@ use std::simd::{
     cmp::{SimdPartialEq, SimdPartialOrd},
 };
 
-use minarrow::{Bitmask, FloatArray, enums::error::KernelError};
+use minarrow::{Bitmask, FloatArray, Vec64, enums::error::KernelError};
 
 use crate::kernels::scientific::distributions::shared::constants::*;
 use crate::kernels::scientific::distributions::univariate::common::simd::{
-    dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
+    dense_univariate_kernel_f64_simd_to, masked_univariate_kernel_f64_simd_to,
 };
 use crate::kernels::scientific::erf::{erf, erf_simd};
 use crate::utils::has_nulls;
 
 // TODO: Add alignment check
+
+/// Lognormal PDF SIMD (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// f(x|μ,σ) = 1/(xσ√2π) * exp(-½[(ln(x)-μ)/σ]^2)
+#[inline(always)]
+pub fn lognormal_pdf_simd_to(
+    x: &[f64],
+    meanlog: f64,
+    sdlog: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    // Parameter checks
+    if sdlog <= 0.0 || !sdlog.is_finite() || !meanlog.is_finite() {
+        return Err(KernelError::InvalidArguments(
+            "lognormal_pdf: invalid parameters".into(),
+        ));
+    }
+    if x.is_empty() {
+        return Ok(());
+    }
+
+    const N: usize = W64;
+    let denom = sdlog * SQRT_2PI;
+
+    // SIMD splats
+    let meanlog_v = Simd::<f64, N>::splat(meanlog);
+    let sdlog_v = Simd::<f64, N>::splat(sdlog);
+    let denom_v = Simd::<f64, N>::splat(denom);
+    let zero_v = Simd::<f64, N>::splat(0.0);
+    let half_neg = Simd::<f64, N>::splat(-0.5);
+
+    // scalar fallback
+    let scalar_body = |xi: f64| -> f64 {
+        if xi > 0.0 {
+            let z = (xi.ln() - meanlog) / sdlog;
+            (-0.5 * z * z).exp() / (denom * xi)
+        } else {
+            0.0
+        }
+    };
+
+    // vectorised body
+    let simd_body = move |x_v: Simd<f64, N>| {
+        let positive = x_v.simd_gt(zero_v);
+        let logx = x_v.ln();
+        let z = (logx - meanlog_v) / sdlog_v;
+        let pdf = (half_neg * z * z).exp() / (denom_v * x_v);
+        positive.select(pdf, zero_v)
+    };
+
+    // Dense fast path
+    if !has_nulls(null_count, null_mask) {
+        dense_univariate_kernel_f64_simd_to::<N, _, _>(x, output, simd_body, scalar_body);
+        return Ok(());
+    }
+
+    // Null-aware path
+    let mask_ref = null_mask.expect("lognormal_pdf: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_simd_to::<N, _, _>(
+        x,
+        mask_ref,
+        output,
+        &mut out_mask,
+        simd_body,
+        scalar_body,
+    );
+    Ok(())
+}
 
 /// SIMD-accelerated implementation of log-normal distribution probability density function.
 ///
@@ -75,67 +147,99 @@ pub fn lognormal_pdf_simd(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // Parameter checks
-    if sdlog <= 0.0 || !sdlog.is_finite() || !meanlog.is_finite() {
-        return Err(KernelError::InvalidArguments(
-            "lognormal_pdf: invalid parameters".into(),
-        ));
-    }
-    if x.is_empty() {
+    let len = x.len();
+    if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    const N: usize = W64;
-    let denom = sdlog * SQRT_2PI;
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    // SIMD splats
+    lognormal_pdf_simd_to(x, meanlog, sdlog, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+// TODO: Add alignment check
+
+/// Lognormal CDF SIMD (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// F(x|μ,σ) = Φ((ln(x) - μ)/σ)
+#[inline(always)]
+pub fn lognormal_cdf_simd_to(
+    x: &[f64],
+    meanlog: f64,
+    sdlog: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    // 1) Parameter checks
+    if sdlog <= 0.0 || !sdlog.is_finite() || !meanlog.is_finite() {
+        return Err(KernelError::InvalidArguments(
+            "lognormal_cdf: invalid parameters".into(),
+        ));
+    }
+    if x.is_empty() {
+        return Ok(());
+    }
+
+    // Constants
+    const N: usize = W64;
+    let sqrt2 = SQRT_2;
+
     let meanlog_v = Simd::<f64, N>::splat(meanlog);
     let sdlog_v = Simd::<f64, N>::splat(sdlog);
-    let denom_v = Simd::<f64, N>::splat(denom);
+    let sqrt2_v = Simd::<f64, N>::splat(sqrt2);
+    let half_v = Simd::<f64, N>::splat(0.5);
+    let one_v = Simd::<f64, N>::splat(1.0);
     let zero_v = Simd::<f64, N>::splat(0.0);
-    let half_neg = Simd::<f64, N>::splat(-0.5);
 
     // scalar fallback
-    let scalar_body = |xi: f64| -> f64 {
+    let scalar_body = move |xi: f64| -> f64 {
         if xi > 0.0 {
-            let z = (xi.ln() - meanlog) / sdlog;
-            (-0.5 * z * z).exp() / (denom * xi)
+            let z = (xi.ln() - meanlog) / sdlog / sqrt2;
+            0.5 * (1.0 + erf(z))
         } else {
             0.0
         }
     };
 
-    // vectorised body
+    // for x>0, compute ½[1+erf((ln x−μ)/(σ√2))], else 0, NaN for NaN inputs
     let simd_body = move |x_v: Simd<f64, N>| {
+        let is_nan = x_v.simd_ne(x_v); // NaN != NaN is true
         let positive = x_v.simd_gt(zero_v);
         let logx = x_v.ln();
-        let z = (logx - meanlog_v) / sdlog_v;
-        let pdf = (half_neg * z * z).exp() / (denom_v * x_v);
-        positive.select(pdf, zero_v)
+        let z = (logx - meanlog_v) / (sdlog_v * sqrt2_v);
+        let phi = half_v * (one_v + erf_simd::<N>(z));
+        // Return NaN for NaN inputs, zero for non-positive, computed value for positive
+        is_nan.select(
+            Simd::<f64, N>::splat(f64::NAN),
+            positive.select(phi, zero_v),
+        )
     };
 
     // Dense fast path
     if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask) =
-            dense_univariate_kernel_f64_simd::<N, _, _>(x, has_mask, simd_body, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        dense_univariate_kernel_f64_simd_to::<N, _, _>(x, output, simd_body, scalar_body);
+        return Ok(());
     }
 
-    // Null-aware path
-    let mask_ref = null_mask.expect("lognormal_pdf: null_count > 0 requires null_mask");
-    let (data, out_mask) =
-        masked_univariate_kernel_f64_simd::<N, _, _>(x, mask_ref, simd_body, scalar_body);
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
-}
+    // Null‐aware path
+    let mask_ref = null_mask.expect("lognormal_cdf: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_simd_to::<N, _, _>(
+        x,
+        mask_ref,
+        output,
+        &mut out_mask,
+        simd_body,
+        scalar_body,
+    );
 
-// TODO: Add alignment check
+    Ok(())
+}
 
 /// SIMD-accelerated implementation of log-normal distribution cumulative distribution function.
 ///
@@ -182,69 +286,15 @@ pub fn lognormal_cdf_simd(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // 1) Parameter checks
-    if sdlog <= 0.0 || !sdlog.is_finite() || !meanlog.is_finite() {
-        return Err(KernelError::InvalidArguments(
-            "lognormal_cdf: invalid parameters".into(),
-        ));
-    }
-    if x.is_empty() {
+    let len = x.len();
+    if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    // Constants
-    const N: usize = W64;
-    let sqrt2 = SQRT_2;
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    let meanlog_v = Simd::<f64, N>::splat(meanlog);
-    let sdlog_v = Simd::<f64, N>::splat(sdlog);
-    let sqrt2_v = Simd::<f64, N>::splat(sqrt2);
-    let half_v = Simd::<f64, N>::splat(0.5);
-    let one_v = Simd::<f64, N>::splat(1.0);
-    let zero_v = Simd::<f64, N>::splat(0.0);
+    lognormal_cdf_simd_to(x, meanlog, sdlog, out.as_mut_slice(), null_mask, null_count)?;
 
-    // scalar fallback
-    let scalar_body = move |xi: f64| -> f64 {
-        if xi > 0.0 {
-            let z = (xi.ln() - meanlog) / sdlog / sqrt2;
-            0.5 * (1.0 + erf(z))
-        } else {
-            0.0
-        }
-    };
-
-    // for x>0, compute ½[1+erf((ln x−μ)/(σ√2))], else 0, NaN for NaN inputs
-    let simd_body = move |x_v: Simd<f64, N>| {
-        let is_nan = x_v.simd_ne(x_v); // NaN != NaN is true
-        let positive = x_v.simd_gt(zero_v);
-        let logx = x_v.ln();
-        let z = (logx - meanlog_v) / (sdlog_v * sqrt2_v);
-        let phi = half_v * (one_v + erf_simd::<N>(z));
-        // Return NaN for NaN inputs, zero for non-positive, computed value for positive
-        is_nan.select(
-            Simd::<f64, N>::splat(f64::NAN),
-            positive.select(phi, zero_v),
-        )
-    };
-
-    // Dense fast path
-    if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask) =
-            dense_univariate_kernel_f64_simd::<N, _, _>(x, has_mask, simd_body, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
-    }
-
-    // Null‐aware path
-    let mask_ref = null_mask.expect("lognormal_cdf: null_count > 0 requires null_mask");
-    let (data, out_mask) =
-        masked_univariate_kernel_f64_simd::<N, _, _>(x, mask_ref, simd_body, scalar_body);
-
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

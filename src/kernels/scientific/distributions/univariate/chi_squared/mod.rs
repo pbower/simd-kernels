@@ -25,9 +25,31 @@
 mod simd;
 mod std;
 
-use minarrow::{Bitmask, FloatArray};
-
+use minarrow::Bitmask;
+use minarrow::FloatArray;
 use minarrow::enums::error::KernelError;
+
+/// Chi-square PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn chi_square_pdf_to(
+    x: &[f64],
+    df: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::chi_square_pdf_simd_to(x, df, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::chi_square_pdf_std_to(x, df, output, null_mask, null_count)
+    }
+}
 
 /// Chi-square PDF: f(x; k) = 1/(2^{k/2} Γ(k/2)) x^{k/2-1} e^{-x/2}
 #[inline(always)]
@@ -48,6 +70,20 @@ pub fn chi_square_pdf(
     }
 }
 
+/// Chi-square CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn chi_square_cdf_to(
+    x: &[f64],
+    df: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::chi_square_cdf_std_to(x, df, output, null_mask, null_count)
+}
+
 /// Chi-square CDF: F(x; k) = P(k/2, x/2)
 #[inline(always)]
 pub fn chi_square_cdf(
@@ -59,11 +95,24 @@ pub fn chi_square_cdf(
     std::chi_square_cdf_std(x, df, null_mask, null_count)
 }
 
+/// Chi-square quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn chi_square_quantile_to(
+    p: &[f64],
+    df: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::chi_square_quantile_std_to(p, df, output, null_mask, null_count)
+}
+
 /// Chi-square quantile function (inverse CDF).
 ///
 /// For each `p` in `p`, returns the value `x` such that `P(X ≤ x) = p` for
 /// a chi-square distribution with `df` degrees of freedom.
-/// Returns error for invalid input probabilities outside [0,1] or NaN.
 #[inline(always)]
 pub fn chi_square_quantile(
     p: &[f64],

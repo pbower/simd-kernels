@@ -13,19 +13,26 @@ use minarrow::enums::error::KernelError;
 
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::distributions::univariate::common::std::{
-    dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
+    dense_univariate_kernel_f64_std, dense_univariate_kernel_f64_std_to,
+    masked_univariate_kernel_f64_std, masked_univariate_kernel_f64_std_to,
 };
 
-/// Lognormal PDF: f(x|μ,σ) = 1/(xσ√2π) * exp(-½[(ln(x)-μ)/σ]^2)
+/// Lognormal PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// f(x|μ,σ) = 1/(xσ√2π) * exp(-½[(ln(x)-μ)/σ]^2)
 #[cfg(not(feature = "simd"))]
 #[inline(always)]
-pub fn lognormal_pdf_std(
+pub fn lognormal_pdf_std_to(
     x: &[f64],
     meanlog: f64,
     sdlog: f64,
+    output: &mut [f64],
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Result<FloatArray<f64>, KernelError> {
+) -> Result<(), KernelError> {
+    use crate::kernels::scientific::distributions::shared::constants::SQRT_2PI;
+
     // Parameter checks
     if sdlog <= 0.0 || !sdlog.is_finite() || !meanlog.is_finite() {
         return Err(KernelError::InvalidArguments(
@@ -33,7 +40,7 @@ pub fn lognormal_pdf_std(
         ));
     }
     if x.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     let denom = sdlog * SQRT_2PI;
@@ -49,41 +56,64 @@ pub fn lognormal_pdf_std(
 
     // Dense fast path (no nulls)
     if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        return Ok(());
     }
 
     // Null-aware path
     let mask_ref = null_mask.expect("lognormal_pdf: null_count > 0 requires null_mask");
-    let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
+    Ok(())
 }
 
-/// Lognormal CDF: F(x|μ,σ) = Φ((ln(x) - μ)/σ)
+/// Lognormal PDF: f(x|μ,σ) = 1/(xσ√2π) * exp(-½[(ln(x)-μ)/σ]^2)
 #[cfg(not(feature = "simd"))]
 #[inline(always)]
-pub fn lognormal_cdf_std(
+pub fn lognormal_pdf_std(
     x: &[f64],
     meanlog: f64,
     sdlog: f64,
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // 1) Parameter checks
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    lognormal_pdf_std_to(x, meanlog, sdlog, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Lognormal CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// F(x|μ,σ) = Φ((ln(x) - μ)/σ)
+#[cfg(not(feature = "simd"))]
+#[inline(always)]
+pub fn lognormal_cdf_std_to(
+    x: &[f64],
+    meanlog: f64,
+    sdlog: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    use crate::kernels::scientific::distributions::shared::constants::SQRT_2;
+
+    // Parameter checks
     if sdlog <= 0.0 || !sdlog.is_finite() || !meanlog.is_finite() {
         return Err(KernelError::InvalidArguments(
             "lognormal_cdf: invalid parameters".into(),
         ));
     }
     if x.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     // Constants
@@ -101,22 +131,87 @@ pub fn lognormal_cdf_std(
 
     // Dense fast path
     if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        return Ok(());
     }
 
     // Null‐aware path
     let mask_ref = null_mask.expect("lognormal_cdf: null_count > 0 requires null_mask");
-    let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
 
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(())
+}
+
+/// Lognormal CDF: F(x|μ,σ) = Φ((ln(x) - μ)/σ)
+#[cfg(not(feature = "simd"))]
+#[inline(always)]
+pub fn lognormal_cdf_std(
+    x: &[f64],
+    meanlog: f64,
+    sdlog: f64,
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<FloatArray<f64>, KernelError> {
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    lognormal_cdf_std_to(x, meanlog, sdlog, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Lognormal quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// Q(p|μ,σ) = exp(μ + σ * Φ⁻¹(p)), p in (0,1)
+#[inline(always)]
+pub fn lognormal_quantile_std_to(
+    p: &[f64],
+    meanlog: f64,
+    sdlog: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    if sdlog <= 0.0 || !sdlog.is_finite() || !meanlog.is_finite() {
+        return Err(KernelError::InvalidArguments(
+            "lognormal_quantile: invalid parameters".into(),
+        ));
+    }
+    let len = p.len();
+    if len == 0 {
+        return Ok(());
+    }
+
+    // Dense fast path: no nulls
+    if !has_nulls(null_count, null_mask) {
+        for (i, &pi) in p.iter().enumerate() {
+            let nq = normal_quantile_scalar(pi, 0.0, 1.0);
+            output[i] = (meanlog + sdlog * nq).exp();
+        }
+        return Ok(());
+    }
+
+    // Propagate input mask nulls as is; retain any new `NaN` or `inf`
+    // values verbatim
+    let mask = null_mask.expect("null_count > 0 requires null_mask");
+
+    for idx in 0..len {
+        if !unsafe { mask.get_unchecked(idx) } {
+            output[idx] = f64::NAN;
+        } else {
+            let pi = p[idx];
+            let nq = normal_quantile_scalar(pi, 0.0, 1.0);
+            output[idx] = (meanlog + sdlog * nq).exp();
+        }
+    }
+    Ok(())
 }
 
 /// Lognormal quantile: Q(p|μ,σ) = exp(μ + σ * Φ⁻¹(p)), p in (0,1)
@@ -128,43 +223,15 @@ pub fn lognormal_quantile_std(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    if sdlog <= 0.0 || !sdlog.is_finite() || !meanlog.is_finite() {
-        return Err(KernelError::InvalidArguments(
-            "lognormal_quantile: invalid parameters".into(),
-        ));
-    }
     let len = p.len();
     if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    // Dense fast path: no nulls
-    if !has_nulls(null_count, null_mask) {
-        let mut out = Vec64::with_capacity(len);
-        for &pi in p {
-            let nq = normal_quantile_scalar(pi, 0.0, 1.0);
-            out.push((meanlog + sdlog * nq).exp());
-        }
-        return Ok(FloatArray::from_vec64(out, null_mask.cloned()));
-    }
-
-    // Propagate input mask nulls as is; retain any new `NaN` or `inf`
-    // values verbatim
-    let mask = null_mask.expect("null_count > 0 requires null_mask");
     let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    for idx in 0..len {
-        if !unsafe { mask.get_unchecked(idx) } {
-            out.push(f64::NAN);
-            continue;
-        }
-        let pi = p[idx];
-        let nq = normal_quantile_scalar(pi, 0.0, 1.0);
-        let q = (meanlog + sdlog * nq).exp();
-        out.push(q);
-    }
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(mask.clone()),
-    })
+    lognormal_quantile_std_to(p, meanlog, sdlog, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

@@ -13,16 +13,83 @@ include!(concat!(env!("OUT_DIR"), "/simd_lanes.rs"));
 use std::simd::{Simd, StdFloat};
 
 use minarrow::utils::is_simd_aligned;
-use minarrow::{Bitmask, FloatArray};
+use minarrow::{Bitmask, FloatArray, Vec64};
 
 use crate::kernels::scientific::distributions::univariate::common::simd::{
-    dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
+    dense_univariate_kernel_f64_simd_to, masked_univariate_kernel_f64_simd_to,
 };
 use crate::kernels::scientific::distributions::univariate::common::std::{
-    dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
+    dense_univariate_kernel_f64_std_to, masked_univariate_kernel_f64_std_to,
 };
 use crate::utils::has_nulls;
 use minarrow::enums::error::KernelError;
+
+/// SIMD-accelerated Gumbel PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// f(x; μ, β) = (1/β) exp(-z - exp(-z)) where z = (x - μ)/β
+#[inline(always)]
+pub fn gumbel_pdf_simd_to(
+    x: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    // Parameter checks
+    if !location.is_finite() || !(scale > 0.0 && scale.is_finite()) {
+        return Err(KernelError::InvalidArguments(
+            "gumbel_pdf: invalid location or scale".into(),
+        ));
+    }
+    if x.is_empty() {
+        return Ok(());
+    }
+
+    const N: usize = W64;
+    let inv_b = 1.0 / scale;
+    let loc_v = Simd::<f64, N>::splat(location);
+    let inv_b_v = Simd::<f64, N>::splat(inv_b);
+
+    let scalar_body = |xi: f64| {
+        let z = (xi - location) * inv_b;
+        inv_b * (-(z + (-z).exp())).exp()
+    };
+
+    let simd_body = move |x_v: Simd<f64, N>| {
+        let z = (x_v - loc_v) * inv_b_v;
+        inv_b_v * (-(z + (-z).exp())).exp()
+    };
+
+    // Dense fast path
+    if !has_nulls(null_count, null_mask) {
+        if is_simd_aligned(x) {
+            dense_univariate_kernel_f64_simd_to::<N, _, _>(x, output, simd_body, scalar_body);
+        } else {
+            dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        }
+        return Ok(());
+    }
+
+    // Null-aware masked path
+    let mask_ref = null_mask.expect("gumbel_pdf: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    if is_simd_aligned(x) {
+        masked_univariate_kernel_f64_simd_to::<N, _, _>(
+            x,
+            mask_ref,
+            output,
+            &mut out_mask,
+            simd_body,
+            scalar_body,
+        );
+    } else {
+        masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
+    }
+
+    Ok(())
+}
 
 /// SIMD-accelerated implementation of Gumbel distribution probability density function.
 ///
@@ -62,15 +129,47 @@ pub fn gumbel_pdf_simd(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // 1) Parameter checks
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    gumbel_pdf_simd_to(
+        x,
+        location,
+        scale,
+        out.as_mut_slice(),
+        null_mask,
+        null_count,
+    )?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// SIMD-accelerated Gumbel CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// F(x; μ, β) = exp(−exp(−z)), z = (x − μ)/β
+#[inline(always)]
+pub fn gumbel_cdf_simd_to(
+    x: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    // Parameter checks
     if !location.is_finite() || !(scale > 0.0 && scale.is_finite()) {
         return Err(KernelError::InvalidArguments(
-            "gumbel_pdf: invalid location or scale".into(),
+            "gumbel_cdf: invalid location or scale".into(),
         ));
     }
-    // 2) Empty input
     if x.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     const N: usize = W64;
@@ -78,59 +177,43 @@ pub fn gumbel_pdf_simd(
     let loc_v = Simd::<f64, N>::splat(location);
     let inv_b_v = Simd::<f64, N>::splat(inv_b);
 
-    // scalar fallback and for the tail
-    let scalar_body = |xi: f64| {
-        let z = (xi - location) * inv_b;
-        inv_b * (-(z + (-z).exp())).exp()
-    };
-
     let simd_body = move |x_v: Simd<f64, N>| {
         let z = (x_v - loc_v) * inv_b_v;
-        inv_b_v * (-(z + (-z).exp())).exp()
+        (-(-z).exp()).exp()
+    };
+
+    let scalar_body = |xi: f64| {
+        let z = (xi - location) * inv_b;
+        (-(-z).exp()).exp()
     };
 
     // Dense fast path
     if !has_nulls(null_count, null_mask) {
-        // Check if arrays are SIMD 64-byte aligned
         if is_simd_aligned(x) {
-            let has_mask = null_mask.is_some();
-            let (data, mask_out) =
-                dense_univariate_kernel_f64_simd::<N, _, _>(x, has_mask, simd_body, scalar_body);
-            return Ok(FloatArray {
-                data: data.into(),
-                null_mask: mask_out,
-            });
+            dense_univariate_kernel_f64_simd_to::<N, _, _>(x, output, simd_body, scalar_body);
+        } else {
+            dense_univariate_kernel_f64_std_to(x, output, scalar_body);
         }
-
-        // Scalar fallback - alignment check failed
-        let has_mask = null_mask.is_some();
-        let (data, mask_out) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask_out,
-        });
+        return Ok(());
     }
 
     // Null-aware masked path
-    let mask_ref = null_mask.expect("gumbel_pdf: null_count > 0 requires null_mask");
-
-    // Check if arrays are SIMD 64-byte aligned
+    let mask_ref = null_mask.expect("gumbel_cdf: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
     if is_simd_aligned(x) {
-        let (data, mask_out) =
-            masked_univariate_kernel_f64_simd::<N, _, _>(x, mask_ref, simd_body, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: Some(mask_out),
-        });
+        masked_univariate_kernel_f64_simd_to::<N, _, _>(
+            x,
+            mask_ref,
+            output,
+            &mut out_mask,
+            simd_body,
+            scalar_body,
+        );
+    } else {
+        masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
     }
 
-    // Scalar fallback - alignment check failed
-    let (data, mask_out) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(mask_out),
-    })
+    Ok(())
 }
 
 /// SIMD-accelerated implementation of Gumbel distribution cumulative distribution function.
@@ -178,75 +261,83 @@ pub fn gumbel_cdf_simd(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // Parameter checks
-    if !location.is_finite() || !(scale > 0.0 && scale.is_finite()) {
-        return Err(KernelError::InvalidArguments(
-            "gumbel_cdf: invalid location or scale".into(),
-        ));
-    }
-    // Empty input
-    if x.is_empty() {
+    let len = x.len();
+    if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    gumbel_cdf_simd_to(
+        x,
+        location,
+        scale,
+        out.as_mut_slice(),
+        null_mask,
+        null_count,
+    )?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// SIMD-accelerated Gumbel quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// Q(p; μ, β) = μ − β · ln(−ln(p))
+#[inline(always)]
+pub fn gumbel_quantile_simd_to(
+    p: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    // Parameter validation
+    if !location.is_finite() || !(scale > 0.0 && scale.is_finite()) {
+        return Err(KernelError::InvalidArguments(
+            "gumbel_quantile: invalid location or scale".into(),
+        ));
+    }
+    if p.is_empty() {
+        return Ok(());
+    }
+
     const N: usize = W64;
-    let inv_b = 1.0 / scale;
     let loc_v = Simd::<f64, N>::splat(location);
-    let inv_b_v = Simd::<f64, N>::splat(inv_b);
+    let scale_v = Simd::<f64, N>::splat(scale);
 
-    let simd_body = move |x_v: Simd<f64, N>| {
-        let z = (x_v - loc_v) * inv_b_v;
-        (-(-z).exp()).exp()
-    };
+    let scalar_body = |pi: f64| -> f64 { location - scale * (-pi.ln()).ln() };
+    let simd_body = move |p_v: Simd<f64, N>| loc_v - scale_v * (-p_v.ln()).ln();
 
-    // Scalar fallback
-    let scalar_body = |xi: f64| {
-        let z = (xi - location) * inv_b;
-        (-(-z).exp()).exp()
-    };
-
-    // Dense fast path (no nulls)
+    // Dense fast path
     if !has_nulls(null_count, null_mask) {
-        // Check if arrays are SIMD 64-byte aligned
-        if is_simd_aligned(x) {
-            let has_mask = null_mask.is_some();
-            let (data, mask_out) =
-                dense_univariate_kernel_f64_simd::<N, _, _>(x, has_mask, simd_body, scalar_body);
-            return Ok(FloatArray {
-                data: data.into(),
-                null_mask: mask_out,
-            });
+        if is_simd_aligned(p) {
+            dense_univariate_kernel_f64_simd_to::<N, _, _>(p, output, simd_body, scalar_body);
+        } else {
+            dense_univariate_kernel_f64_std_to(p, output, scalar_body);
         }
-
-        // Scalar fallback - alignment check failed
-        let has_mask = null_mask.is_some();
-        let (data, mask_out) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask_out,
-        });
+        return Ok(());
     }
 
     // Null-aware masked path
-    let mask_ref = null_mask.expect("gumbel_cdf: null_count > 0 requires null_mask");
-
-    // Check if arrays are SIMD 64-byte aligned
-    if is_simd_aligned(x) {
-        let (data, mask_out) =
-            masked_univariate_kernel_f64_simd::<N, _, _>(x, mask_ref, simd_body, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: Some(mask_out),
-        });
+    let mask_ref = null_mask.expect("gumbel_quantile: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    if is_simd_aligned(p) {
+        masked_univariate_kernel_f64_simd_to::<N, _, _>(
+            p,
+            mask_ref,
+            output,
+            &mut out_mask,
+            simd_body,
+            scalar_body,
+        );
+    } else {
+        masked_univariate_kernel_f64_std_to(p, mask_ref, output, &mut out_mask, scalar_body);
     }
 
-    // Scalar fallback - alignment check failed
-    let (data, mask_out) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(mask_out),
-    })
+    Ok(())
 }
 
 /// SIMD-accelerated implementation of Gumbel distribution quantile function.
@@ -287,65 +378,22 @@ pub fn gumbel_quantile_simd(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // Parameter validation
-    if !location.is_finite() || !(scale > 0.0 && scale.is_finite()) {
-        return Err(KernelError::InvalidArguments(
-            "gumbel_quantile: invalid location or scale".into(),
-        ));
-    }
     let len = p.len();
     if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    const N: usize = W64;
-    let loc_v = Simd::<f64, N>::splat(location);
-    let scale_v = Simd::<f64, N>::splat(scale);
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    // Scalar fallback: no domain gating, pure evaluation
-    let scalar_body = |pi: f64| -> f64 { location - scale * (-pi.ln()).ln() };
-    let simd_body = move |p_v: Simd<f64, N>| loc_v - scale_v * (-p_v.ln()).ln();
+    gumbel_quantile_simd_to(
+        p,
+        location,
+        scale,
+        out.as_mut_slice(),
+        null_mask,
+        null_count,
+    )?;
 
-    // Dense fast path (no nulls)
-    if !has_nulls(null_count, null_mask) {
-        // Check if arrays are SIMD 64-byte aligned
-        if is_simd_aligned(p) {
-            let has_mask = null_mask.is_some();
-            let (data, mask_out) =
-                dense_univariate_kernel_f64_simd::<N, _, _>(p, has_mask, simd_body, scalar_body);
-            return Ok(FloatArray {
-                data: data.into(),
-                null_mask: mask_out,
-            });
-        }
-
-        // Scalar fallback - alignment check failed
-        let has_mask = null_mask.is_some();
-        let (data, mask_out) = dense_univariate_kernel_f64_std(p, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask_out,
-        });
-    }
-
-    // Null-aware masked path
-    let mask_ref = null_mask.expect("gumbel_quantile: null_count > 0 requires null_mask");
-
-    // Check if arrays are SIMD 64-byte aligned
-    if is_simd_aligned(p) {
-        let (data, mask_out) =
-            masked_univariate_kernel_f64_simd::<N, _, _>(p, mask_ref, simd_body, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: Some(mask_out),
-        });
-    }
-
-    // Scalar fallback - alignment check failed
-    let (data, mask_out) = masked_univariate_kernel_f64_std(p, mask_ref, scalar_body);
-
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(mask_out),
-    })
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

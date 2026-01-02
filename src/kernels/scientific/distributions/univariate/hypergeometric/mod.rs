@@ -133,6 +133,69 @@ pub fn hypergeometric_quantile(
     std::hypergeometric_quantile_std(p, population, success, draws, null_mask, null_count)
 }
 
+/// Zero-allocation variant of [`hypergeometric_pmf`].
+///
+/// Writes directly to caller-provided output buffer.
+/// P(X = k) = C(K,k) × C(N-K, n-k) / C(N,n)
+#[inline(always)]
+pub fn hypergeometric_pmf_to(
+    k: &[u64],
+    population: u64,
+    success: u64,
+    draws: u64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::hypergeometric_pmf_simd_to(
+            k, population, success, draws, output, null_mask, null_count,
+        )
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::hypergeometric_pmf_std_to(k, population, success, draws, output, null_mask, null_count)
+    }
+}
+
+/// Zero-allocation variant of [`hypergeometric_cdf`].
+///
+/// Writes directly to caller-provided output buffer.
+/// F(k) = ∑_{i=0}^k PMF(i)
+#[inline(always)]
+pub fn hypergeometric_cdf_to(
+    k: &[u64],
+    population: u64,
+    success: u64,
+    draws: u64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::hypergeometric_cdf_std_to(k, population, success, draws, output, null_mask, null_count)
+}
+
+/// Zero-allocation variant of [`hypergeometric_quantile`].
+///
+/// Writes directly to caller-provided output buffer.
+/// Q(p) = smallest k such that CDF(k) ≥ p
+#[inline(always)]
+pub fn hypergeometric_quantile_to(
+    p: &[f64],
+    population: u64,
+    success: u64,
+    draws: u64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::hypergeometric_quantile_std_to(
+        p, population, success, draws, output, null_mask, null_count,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use crate::kernels::scientific::distributions::univariate::common::dense_data;

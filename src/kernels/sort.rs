@@ -117,6 +117,19 @@ pub fn total_cmp_f<T: Float>(a: &T, b: &T) -> Ordering {
 }
 
 /// Returns a newly sorted Vec64, leaving the original slice untouched.
+/// Zero-allocation variant: writes sorted data to caller's output buffer.
+/// Panics if `out.len() != data.len()`.
+#[inline]
+pub fn sorted_float_to<T: Float>(data: &[T], out: &mut [T]) {
+    assert_eq!(
+        data.len(),
+        out.len(),
+        "sorted_float_to: input/output length mismatch"
+    );
+    out.copy_from_slice(data);
+    sort_float(out);
+}
+
 pub fn sorted_float<T: Float>(data: &[T]) -> Vec64<T> {
     let mut v = Vec64::from_slice(data);
     sort_float(&mut v);
@@ -171,6 +184,19 @@ pub fn sort_int<T: Ord + Copy>(slice: &mut [T]) {
 /// // sorted contains [11, 12, 22, 25, 34, 64, 90]
 /// // original data unchanged
 /// ```
+/// Zero-allocation variant: writes sorted data to caller's output buffer.
+/// Panics if `out.len() != data.len()`.
+#[inline]
+pub fn sorted_int_to<T: Ord + Copy>(data: &[T], out: &mut [T]) {
+    assert_eq!(
+        data.len(),
+        out.len(),
+        "sorted_int_to: input/output length mismatch"
+    );
+    out.copy_from_slice(data);
+    sort_int(out);
+}
+
 pub fn sorted_int<T: Ord + Copy>(data: &[T]) -> Vec64<T> {
     let mut v = Vec64::from_slice(data);
     sort_int(&mut v);

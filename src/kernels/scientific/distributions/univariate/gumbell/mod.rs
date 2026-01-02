@@ -205,6 +205,78 @@ pub fn gumbel_quantile(
     }
 }
 
+/// Zero-allocation variant of [`gumbel_pdf`].
+///
+/// Writes directly to caller-provided output buffer.
+/// f(x; μ, β) = (1/β) exp(-z - exp(-z)) where z = (x - μ)/β
+#[inline(always)]
+pub fn gumbel_pdf_to(
+    x: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::gumbel_pdf_simd_to(x, location, scale, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::gumbel_pdf_std_to(x, location, scale, output, null_mask, null_count)
+    }
+}
+
+/// Zero-allocation variant of [`gumbel_cdf`].
+///
+/// Writes directly to caller-provided output buffer.
+/// F(x; μ, β) = exp(-exp(-z)) where z = (x - μ)/β
+#[inline(always)]
+pub fn gumbel_cdf_to(
+    x: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::gumbel_cdf_simd_to(x, location, scale, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::gumbel_cdf_std_to(x, location, scale, output, null_mask, null_count)
+    }
+}
+
+/// Zero-allocation variant of [`gumbel_quantile`].
+///
+/// Writes directly to caller-provided output buffer.
+/// Q(p; μ, β) = μ - β ln(-ln(p))
+#[inline(always)]
+pub fn gumbel_quantile_to(
+    p: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::gumbel_quantile_simd_to(p, location, scale, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::gumbel_quantile_std_to(p, location, scale, output, null_mask, null_count)
+    }
+}
+
 #[cfg(test)]
 mod gumbel_tests {
     use crate::kernels::scientific::distributions::univariate::common::dense_data;

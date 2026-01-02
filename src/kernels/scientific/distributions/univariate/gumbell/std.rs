@@ -8,13 +8,57 @@
 //! and quantile function. These implementations serve as the fallback when SIMD is not
 //! available and are optimised for scalar computation patterns.
 
-use minarrow::{Bitmask, FloatArray};
+use minarrow::{Bitmask, FloatArray, Vec64};
 
 use crate::kernels::scientific::distributions::univariate::common::std::{
-    dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
+    dense_univariate_kernel_f64_std_to, masked_univariate_kernel_f64_std_to,
 };
 use crate::utils::has_nulls;
 use minarrow::enums::error::KernelError;
+
+/// Gumbel PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// f(x; μ, β) = (1/β) exp(-z - exp(-z)) where z = (x - μ)/β
+#[inline(always)]
+pub fn gumbel_pdf_std_to(
+    x: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    // Parameter checks
+    if !location.is_finite() || !(scale > 0.0 && scale.is_finite()) {
+        return Err(KernelError::InvalidArguments(
+            "gumbel_pdf: invalid location or scale".into(),
+        ));
+    }
+    if x.is_empty() {
+        return Ok(());
+    }
+
+    let inv_b = 1.0 / scale;
+
+    let scalar_body = |xi: f64| {
+        let z = (xi - location) * inv_b;
+        inv_b * (-(z + (-z).exp())).exp()
+    };
+
+    // Dense fast path (no nulls)
+    if !has_nulls(null_count, null_mask) {
+        dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        return Ok(());
+    }
+
+    // Null-aware masked path
+    let mask_ref = null_mask.expect("gumbel_pdf: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
+
+    Ok(())
+}
 
 /// Gumbel (type I extreme value)
 #[inline(always)]
@@ -25,44 +69,68 @@ pub fn gumbel_pdf_std(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // 1) Parameter checks
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    gumbel_pdf_std_to(
+        x,
+        location,
+        scale,
+        out.as_mut_slice(),
+        null_mask,
+        null_count,
+    )?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Gumbel CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// F(x; μ, β) = exp(−exp(−z)),   z = (x − μ)/β
+#[inline(always)]
+pub fn gumbel_cdf_std_to(
+    x: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    // Parameter checks
     if !location.is_finite() || !(scale > 0.0 && scale.is_finite()) {
         return Err(KernelError::InvalidArguments(
-            "gumbel_pdf: invalid location or scale".into(),
+            "gumbel_cdf: invalid location or scale".into(),
         ));
     }
-    // 2) Empty input
     if x.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     let inv_b = 1.0 / scale;
 
-    // scalar fallback and for the tail
     let scalar_body = |xi: f64| {
         let z = (xi - location) * inv_b;
-        inv_b * (-(z + (-z).exp())).exp()
+        (-(-z).exp()).exp()
     };
 
     // Dense fast path (no nulls)
     if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask_out) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask_out,
-        });
+        dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        return Ok(());
     }
 
     // Null-aware masked path
-    let mask_ref = null_mask.expect("gumbel_pdf: null_count > 0 requires null_mask");
+    let mask_ref = null_mask.expect("gumbel_cdf: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
 
-    let (data, mask_out) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(mask_out),
-    })
+    Ok(())
 }
 
 /// CDF of the Gumbel (type I extreme) distribution:
@@ -75,43 +143,63 @@ pub fn gumbel_cdf_std(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // Parameter checks
-    if !location.is_finite() || !(scale > 0.0 && scale.is_finite()) {
-        return Err(KernelError::InvalidArguments(
-            "gumbel_cdf: invalid location or scale".into(),
-        ));
-    }
-    // Empty input
-    if x.is_empty() {
+    let len = x.len();
+    if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    let inv_b = 1.0 / scale;
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    let scalar_body = |xi: f64| {
-        let z = (xi - location) * inv_b;
-        (-(-z).exp()).exp()
-    };
+    gumbel_cdf_std_to(
+        x,
+        location,
+        scale,
+        out.as_mut_slice(),
+        null_mask,
+        null_count,
+    )?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Gumbel quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// Q(p; μ, β) = μ − β · ln(−ln(p))
+#[inline(always)]
+pub fn gumbel_quantile_std_to(
+    p: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    // Parameter validation
+    if !location.is_finite() || !(scale > 0.0 && scale.is_finite()) {
+        return Err(KernelError::InvalidArguments(
+            "gumbel_quantile: invalid location or scale".into(),
+        ));
+    }
+    if p.is_empty() {
+        return Ok(());
+    }
+
+    let scalar_body = |pi: f64| -> f64 { location - scale * (-pi.ln()).ln() };
 
     // Dense fast path (no nulls)
     if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask_out) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask_out,
-        });
+        dense_univariate_kernel_f64_std_to(p, output, scalar_body);
+        return Ok(());
     }
 
     // Null-aware masked path
-    let mask_ref = null_mask.expect("gumbel_cdf: null_count > 0 requires null_mask");
+    let mask_ref = null_mask.expect("gumbel_quantile: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(p, mask_ref, output, &mut out_mask, scalar_body);
 
-    let (data, mask_out) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(mask_out),
-    })
+    Ok(())
 }
 
 /// Gumbel quantile (inverse CDF), null-aware and SIMD-accelerated.
@@ -124,36 +212,22 @@ pub fn gumbel_quantile_std(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // Parameter validation
-    if !location.is_finite() || !(scale > 0.0 && scale.is_finite()) {
-        return Err(KernelError::InvalidArguments(
-            "gumbel_quantile: invalid location or scale".into(),
-        ));
-    }
     let len = p.len();
     if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    let scalar_body = |pi: f64| -> f64 { location - scale * (-pi.ln()).ln() };
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    // Dense fast path (no nulls)
-    if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask_out) = dense_univariate_kernel_f64_std(p, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask_out,
-        });
-    }
+    gumbel_quantile_std_to(
+        p,
+        location,
+        scale,
+        out.as_mut_slice(),
+        null_mask,
+        null_count,
+    )?;
 
-    // Null-aware masked path
-    let mask_ref = null_mask.expect("gumbel_quantile: null_count > 0 requires null_mask");
-
-    let (data, mask_out) = masked_univariate_kernel_f64_std(p, mask_ref, scalar_body);
-
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(mask_out),
-    })
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

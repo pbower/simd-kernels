@@ -6,22 +6,26 @@ use minarrow::{Bitmask, FloatArray, Vec64};
 use crate::kernels::scientific::distributions::shared::scalar::*;
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::distributions::univariate::common::std::{
-    dense_univariate_kernel_u64_std, masked_univariate_kernel_u64_std,
+    dense_univariate_kernel_u64_std_to, masked_univariate_kernel_u64_std_to,
 };
 use crate::utils::has_nulls;
 use minarrow::enums::error::KernelError;
 
-/// Hypergeometric PMF: P(X = k)
+/// Hypergeometric PMF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// P(X = k) = C(K,k) × C(N-K, n-k) / C(N,n)
 #[cfg(not(feature = "simd"))]
 #[inline(always)]
-pub fn hypergeometric_pmf_std(
+pub fn hypergeometric_pmf_std_to(
     k: &[u64],
     population: u64,
     success: u64,
     draws: u64,
+    output: &mut [f64],
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Result<FloatArray<f64>, KernelError> {
+) -> Result<(), KernelError> {
     // parameter checks
     if population == 0 || success > population || draws > population {
         return Err(KernelError::InvalidArguments(
@@ -29,7 +33,7 @@ pub fn hypergeometric_pmf_std(
         ));
     }
     if k.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     // common pre-computations
@@ -47,27 +51,22 @@ pub fn hypergeometric_pmf_std(
 
     // choose dense vs. masked
     if !has_nulls(null_count, null_mask) {
-        // dense path
-        let (data, mask) = dense_univariate_kernel_u64_std(k, null_mask.is_some(), scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        dense_univariate_kernel_u64_std_to(k, output, scalar_body);
+        return Ok(());
     }
 
     // masked path
     let in_mask = null_mask.expect("hypergeometric_pmf: null_count > 0 requires null_mask");
-    let (data, mask_out) = masked_univariate_kernel_u64_std(k, in_mask, scalar_body);
+    let mut out_mask = in_mask.clone();
+    masked_univariate_kernel_u64_std_to(k, in_mask, output, &mut out_mask, scalar_body);
 
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(mask_out),
-    })
+    Ok(())
 }
 
-/// Hypergeometric CDF: F(k) = ∑_{i=0}^k PMF(i)
+/// Hypergeometric PMF: P(X = k)
+#[cfg(not(feature = "simd"))]
 #[inline(always)]
-pub fn hypergeometric_cdf_std(
+pub fn hypergeometric_pmf_std(
     k: &[u64],
     population: u64,
     success: u64,
@@ -75,21 +74,55 @@ pub fn hypergeometric_cdf_std(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
+    let len = k.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    hypergeometric_pmf_std_to(
+        k,
+        population,
+        success,
+        draws,
+        out.as_mut_slice(),
+        null_mask,
+        null_count,
+    )?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Hypergeometric CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// F(k) = ∑_{i=0}^k PMF(i)
+#[inline(always)]
+pub fn hypergeometric_cdf_std_to(
+    k: &[u64],
+    population: u64,
+    success: u64,
+    draws: u64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     if population == 0 || success > population || draws > population {
         return Err(KernelError::InvalidArguments(
             "hypergeometric_cdf: invalid parameters".into(),
         ));
     }
     if k.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
+
     let min_k = draws.min(success);
-    let len = k.len();
+    let ln_denom = ln_choose(population, draws);
 
     if !has_nulls(null_count, null_mask) {
-        let ln_denom = ln_choose(population, draws);
-        let mut out = Vec64::with_capacity(len);
-        for &ki in k {
+        for (idx, &ki) in k.iter().enumerate() {
             let kmax = ki.min(min_k);
             let mut sum = 0.0;
             for s in 0..=kmax {
@@ -99,23 +132,16 @@ pub fn hypergeometric_cdf_std(
                         .exp();
                 }
             }
-            out.push(sum);
+            output[idx] = sum;
         }
-
-        // Clone `None` for null mask, or "all true" where null_count was `0`
-        return Ok(FloatArray::from_vec64(out, null_mask.cloned()));
+        return Ok(());
     }
 
     let mask = null_mask.expect("null_count > 0 requires null_mask");
-    let ln_denom = ln_choose(population, draws);
-    let mut out = Vec64::with_capacity(len);
 
-    for idx in 0..len {
+    for idx in 0..k.len() {
         if !unsafe { mask.get_unchecked(idx) } {
-            // Sentinel
-            // We could leave trash in there for better performance in future
-            // given it's masked anyway.
-            out.push(f64::NAN);
+            output[idx] = f64::NAN;
             continue;
         }
         let ki = k[idx];
@@ -128,37 +154,68 @@ pub fn hypergeometric_cdf_std(
                     .exp();
             }
         }
-        out.push(sum);
+        output[idx] = sum;
     }
-    // we propagate null mask
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(mask.clone()),
-    })
+
+    Ok(())
 }
 
-/// Hypergeometric quantile: Q(p) = smallest k such that CDF(k) ≥ p
+/// Hypergeometric CDF: F(k) = ∑_{i=0}^k PMF(i)
 #[inline(always)]
-pub fn hypergeometric_quantile_std(
-    p: &[f64],
+pub fn hypergeometric_cdf_std(
+    k: &[u64],
     population: u64,
     success: u64,
     draws: u64,
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
+    let len = k.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    hypergeometric_cdf_std_to(
+        k,
+        population,
+        success,
+        draws,
+        out.as_mut_slice(),
+        null_mask,
+        null_count,
+    )?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Hypergeometric quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// Q(p) = smallest k such that CDF(k) ≥ p
+#[inline(always)]
+pub fn hypergeometric_quantile_std_to(
+    p: &[f64],
+    population: u64,
+    success: u64,
+    draws: u64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     if population == 0 || success > population || draws > population {
         return Err(KernelError::InvalidArguments(
             "hypergeometric_quantile: invalid parameters".into(),
         ));
     }
     if p.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     let n = draws;
     let kmax = draws.min(success);
-    let len = p.len();
     let ln_denom = ln_choose(population, draws);
 
     let compute_quantile = |pi: f64| -> f64 {
@@ -193,30 +250,53 @@ pub fn hypergeometric_quantile_std(
         qk as f64
     };
 
-    let mut out = Vec64::with_capacity(len);
-
     if !has_nulls(null_count, null_mask) {
-        for &pi in p {
-            out.push(compute_quantile(pi));
+        for (idx, &pi) in p.iter().enumerate() {
+            output[idx] = compute_quantile(pi);
         }
-        // Clone `None` for null mask, or "all true" where null_count was `0`
-        return Ok(FloatArray::from_vec64(out, null_mask.cloned()));
+        return Ok(());
     }
 
     let mask = null_mask.expect("null_count > 0 requires null_mask");
 
-    for idx in 0..len {
+    for idx in 0..p.len() {
         if !mask.get(idx) {
-            // Push sentinel
-            out.push(f64::NAN);
+            output[idx] = f64::NAN;
         } else {
-            out.push(compute_quantile(p[idx]));
+            output[idx] = compute_quantile(p[idx]);
         }
     }
 
-    // Propagate input mask
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(mask.clone()),
-    })
+    Ok(())
+}
+
+/// Hypergeometric quantile: Q(p) = smallest k such that CDF(k) ≥ p
+#[inline(always)]
+pub fn hypergeometric_quantile_std(
+    p: &[f64],
+    population: u64,
+    success: u64,
+    draws: u64,
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<FloatArray<f64>, KernelError> {
+    let len = p.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    hypergeometric_quantile_std_to(
+        p,
+        population,
+        success,
+        draws,
+        out.as_mut_slice(),
+        null_mask,
+        null_count,
+    )?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

@@ -46,33 +46,41 @@ fn prealloc_vec<T: Copy>(len: usize) -> Vec64<T> {
 
 // Rolling kernels (sum, product, min, max, mean, count)
 
+/// Zero-allocation variant: writes directly to caller's output buffers.
+///
 /// Generic sliding window aggregator for kernels that allow an
 /// incremental push and pop update (sum, product, etc.).
 /// Always emits the running aggregate, even when the subwindow has nulls.
-/// Only flags “valid” once the full subwindow has been seen.
+/// Only flags "valid" once the full subwindow has been seen.
+///
+/// Panics if `out.len() != data.len()` or `out_mask.capacity() < data.len()`.
 #[inline(always)]
-fn rolling_push_pop<T, FAdd, FRem>(
+fn rolling_push_pop_to<T, FAdd, FRem>(
     data: &[T],
     mask: Option<&Bitmask>,
     subwindow: usize,
     mut add: FAdd,
     mut remove: FRem,
     zero: T,
-) -> (Vec64<T>, Bitmask)
-where
+    out: &mut [T],
+    out_mask: &mut Bitmask,
+) where
     T: Copy,
     FAdd: FnMut(T, T) -> T,
     FRem: FnMut(T, T) -> T,
 {
     let n = data.len();
-    let mut out = prealloc_vec::<T>(n);
-    let mut out_mask = new_null_mask(n);
+    assert_eq!(
+        n,
+        out.len(),
+        "rolling_push_pop_to: input/output length mismatch"
+    );
 
     if subwindow == 0 {
-        for slot in &mut out {
+        for slot in out.iter_mut() {
             *slot = zero;
         }
-        return (out, out_mask);
+        return;
     }
 
     let mut agg = zero;
@@ -100,28 +108,66 @@ where
             out[i] = agg;
         }
     }
+}
+
+/// Allocating variant: creates new output buffers internally.
+#[inline(always)]
+pub fn rolling_push_pop<T, FAdd, FRem>(
+    data: &[T],
+    mask: Option<&Bitmask>,
+    subwindow: usize,
+    add: FAdd,
+    remove: FRem,
+    zero: T,
+) -> (Vec64<T>, Bitmask)
+where
+    T: Copy,
+    FAdd: FnMut(T, T) -> T,
+    FRem: FnMut(T, T) -> T,
+{
+    let n = data.len();
+    let mut out = prealloc_vec::<T>(n);
+    let mut out_mask = new_null_mask(n);
+    rolling_push_pop_to(
+        data,
+        mask,
+        subwindow,
+        add,
+        remove,
+        zero,
+        &mut out,
+        &mut out_mask,
+    );
     (out, out_mask)
 }
 
+/// Zero-allocation variant: writes directly to caller's output buffers.
+///
 /// Generic rolling extreme aggregator (min/max) for a subwindow over a slice.
+///
+/// Panics if `out.len() != data.len()`.
 #[inline(always)]
-fn rolling_extreme<T, F>(
+pub fn rolling_extreme_to<T, F>(
     data: &[T],
     mask: Option<&Bitmask>,
     subwindow: usize,
     mut better: F,
     zero: T,
-) -> (Vec64<T>, Bitmask)
-where
+    out: &mut [T],
+    out_mask: &mut Bitmask,
+) where
     T: Copy,
     F: FnMut(&T, &T) -> bool,
 {
     let n = data.len();
-    let mut out = prealloc_vec::<T>(n);
-    let mut out_mask = new_null_mask(n);
+    assert_eq!(
+        n,
+        out.len(),
+        "rolling_extreme_to: input/output length mismatch"
+    );
 
     if subwindow == 0 {
-        return (out, out_mask);
+        return;
     }
 
     for i in 0..n {
@@ -149,7 +195,54 @@ where
         unsafe { out_mask.set_unchecked(i, found) };
         out[i] = if found { extreme } else { zero };
     }
+}
+
+/// Allocating variant: creates new output buffers internally.
+#[inline(always)]
+pub fn rolling_extreme<T, F>(
+    data: &[T],
+    mask: Option<&Bitmask>,
+    subwindow: usize,
+    better: F,
+    zero: T,
+) -> (Vec64<T>, Bitmask)
+where
+    T: Copy,
+    F: FnMut(&T, &T) -> bool,
+{
+    let n = data.len();
+    let mut out = prealloc_vec::<T>(n);
+    let mut out_mask = new_null_mask(n);
+    rolling_extreme_to(data, mask, subwindow, better, zero, &mut out, &mut out_mask);
     (out, out_mask)
+}
+
+/// Zero-allocation variant: writes directly to caller's output buffers.
+///
+/// Computes rolling sums over a sliding window for integer data with null-aware semantics.
+/// Panics if `out.len() != data.len()`.
+#[inline]
+pub fn rolling_sum_int_to<T: Num + Copy + Zero>(
+    data: &[T],
+    mask: Option<&Bitmask>,
+    subwindow: usize,
+    out: &mut [T],
+    out_mask: &mut Bitmask,
+) {
+    rolling_push_pop_to(
+        data,
+        mask,
+        subwindow,
+        |a, b| a + b,
+        |a, b| a - b,
+        T::zero(),
+        out,
+        out_mask,
+    );
+    if mask.is_some() && subwindow > 0 && subwindow - 1 < out.len() {
+        unsafe { out_mask.set_unchecked(subwindow - 1, false) };
+        out[subwindow - 1] = T::zero();
+    }
 }
 
 /// Computes rolling sums over a sliding window for integer data with null-aware semantics.
@@ -167,15 +260,6 @@ where
 /// - Rolling sums for each position where a complete window exists
 /// - Zero values for positions before the window is complete
 /// - Null mask indicating validity (false for incomplete windows or null-contaminated windows)
-///
-/// ## Examples
-/// ```rust,ignore
-/// use minarrow::IntegerArray;
-/// use simd_kernels::kernels::window::rolling_sum_int;
-///
-/// let arr = IntegerArray::<i32>::from_slice(&[1, 2, 3, 4, 5]);
-/// let result = rolling_sum_int((&arr, 0, arr.len()), 3);
-/// ```
 #[inline]
 pub fn rolling_sum_int<T: Num + Copy + Zero>(
     window: IntegerAVT<'_, T>,
@@ -184,21 +268,40 @@ pub fn rolling_sum_int<T: Num + Copy + Zero>(
     let (arr, offset, len) = window;
     let data = &arr.data[offset..offset + len];
     let mask = arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len));
-    let (mut out, mut out_mask) = rolling_push_pop(
+    let mut out = prealloc_vec::<T>(len);
+    let mut out_mask = new_null_mask(len);
+    rolling_sum_int_to(data, mask.as_ref(), subwindow, &mut out, &mut out_mask);
+    IntegerArray {
+        data: out.into(),
+        null_mask: Some(out_mask),
+    }
+}
+
+/// Zero-allocation variant: writes directly to caller's output buffers.
+///
+/// Computes rolling sums over a sliding window for floating-point data.
+/// Panics if `out.len() != data.len()`.
+#[inline]
+pub fn rolling_sum_float_to<T: Float + Copy + Zero>(
+    data: &[T],
+    mask: Option<&Bitmask>,
+    subwindow: usize,
+    out: &mut [T],
+    out_mask: &mut Bitmask,
+) {
+    rolling_push_pop_to(
         data,
-        mask.as_ref(),
+        mask,
         subwindow,
         |a, b| a + b,
         |a, b| a - b,
         T::zero(),
+        out,
+        out_mask,
     );
-    if arr.null_mask.is_some() && subwindow > 0 && subwindow - 1 < out.len() {
-        unsafe { out_mask.set_unchecked(subwindow - 1, false) };
+    if subwindow > 0 && subwindow - 1 < out.len() {
+        out_mask.set(subwindow - 1, false);
         out[subwindow - 1] = T::zero();
-    }
-    IntegerArray {
-        data: out.into(),
-        null_mask: Some(out_mask),
     }
 }
 
@@ -217,15 +320,6 @@ pub fn rolling_sum_int<T: Num + Copy + Zero>(
 /// - Rolling sums computed incrementally for efficiency
 /// - Zero values for positions with incomplete windows
 /// - Proper null mask for window validity tracking
-///
-/// ## Examples
-/// ```rust,ignore
-/// use minarrow::FloatArray;
-/// use simd_kernels::kernels::window::rolling_sum_float;
-///
-/// let arr = FloatArray::<f64>::from_slice(&[1.5, 2.3, 3.7, 4.1]);
-/// let result = rolling_sum_float((&arr, 0, arr.len()), 2);
-/// ```
 #[inline]
 pub fn rolling_sum_float<T: Float + Copy + Zero>(
     window: FloatAVT<'_, T>,
@@ -234,21 +328,40 @@ pub fn rolling_sum_float<T: Float + Copy + Zero>(
     let (arr, offset, len) = window;
     let data = &arr.data[offset..offset + len];
     let mask = arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len));
-    let (mut out, mut out_mask) = rolling_push_pop(
-        data,
-        mask.as_ref(),
-        subwindow,
-        |a, b| a + b,
-        |a, b| a - b,
-        T::zero(),
-    );
-    if subwindow > 0 && subwindow - 1 < out.len() {
-        out_mask.set(subwindow - 1, false);
-        out[subwindow - 1] = T::zero();
-    }
+    let mut out = prealloc_vec::<T>(len);
+    let mut out_mask = new_null_mask(len);
+    rolling_sum_float_to(data, mask.as_ref(), subwindow, &mut out, &mut out_mask);
     FloatArray {
         data: out.into(),
         null_mask: Some(out_mask),
+    }
+}
+
+/// Zero-allocation variant: writes directly to caller's output buffers.
+///
+/// Computes rolling sums over i32 data (pre-converted from booleans).
+/// Panics if `out.len() != data.len()`.
+#[inline]
+pub fn rolling_sum_bool_to(
+    data: &[i32],
+    mask: Option<&Bitmask>,
+    subwindow: usize,
+    out: &mut [i32],
+    out_mask: &mut Bitmask,
+) {
+    rolling_push_pop_to(
+        data,
+        mask,
+        subwindow,
+        |a, b| a + b,
+        |a, b| a - b,
+        0,
+        out,
+        out_mask,
+    );
+    if subwindow > 0 && subwindow - 1 < out.len() {
+        out_mask.set(subwindow - 1, false);
+        out[subwindow - 1] = 0;
     }
 }
 
@@ -267,36 +380,39 @@ pub fn rolling_sum_float<T: Float + Copy + Zero>(
 /// - Count of true values within each complete window
 /// - Zero for positions with incomplete windows
 /// - Null mask indicating window completeness and null contamination
-///
-/// ## Examples
-/// ```rust,ignore
-/// use minarrow::BooleanArray;
-/// use simd_kernels::kernels::window::rolling_sum_bool;
-///
-/// let bools = BooleanArray::from_slice(&[true, false, true, true]);
-/// let result = rolling_sum_bool((&bools, 0, bools.len()), 2);
-/// ```
 #[inline]
 pub fn rolling_sum_bool(window: BooleanAVT<'_, ()>, subwindow: usize) -> IntegerArray<i32> {
     let (arr, offset, len) = window;
     let bools: Vec<i32> = arr.iter_range(offset, len).map(|b| b as i32).collect();
     let mask = arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len));
-    let (mut out, mut out_mask) = rolling_push_pop(
-        &bools,
-        mask.as_ref(),
-        subwindow,
-        |a, b| a + b,
-        |a, b| a - b,
-        0,
-    );
-    if subwindow > 0 && subwindow - 1 < out.len() {
-        out_mask.set(subwindow - 1, false);
-        out[subwindow - 1] = 0;
-    }
+    let mut out = prealloc_vec::<i32>(len);
+    let mut out_mask = new_null_mask(len);
+    rolling_sum_bool_to(&bools, mask.as_ref(), subwindow, &mut out, &mut out_mask);
     IntegerArray {
         data: out.into(),
         null_mask: Some(out_mask),
     }
+}
+
+/// Zero-allocation variant: writes directly to caller's output buffers.
+#[inline]
+pub fn rolling_product_int_to<T: Num + Copy + One + Zero>(
+    data: &[T],
+    mask: Option<&Bitmask>,
+    subwindow: usize,
+    out: &mut [T],
+    out_mask: &mut Bitmask,
+) {
+    rolling_push_pop_to(
+        data,
+        mask,
+        subwindow,
+        |a, b| a * b,
+        |a, b| a / b,
+        T::one(),
+        out,
+        out_mask,
+    );
 }
 
 /// Computes rolling products over a sliding window for integer data with overflow protection.
@@ -304,25 +420,6 @@ pub fn rolling_sum_bool(window: BooleanAVT<'_, ()>, subwindow: usize) -> Integer
 /// Applies multiplicative aggregation across sliding windows using incremental computation
 /// through division operations. Maintains numerical stability through careful handling of
 /// zero values and potential overflow conditions in integer arithmetic.
-///
-/// ## Parameters
-/// * `window` - Integer array view containing multiplicands and window specification
-/// * `subwindow` - Number of consecutive elements to multiply in each window
-///
-/// ## Returns
-/// Returns an `IntegerArray<T>` containing:
-/// - Rolling products computed via incremental multiplication/division
-/// - Identity value (1) for positions with incomplete windows
-/// - Null mask reflecting window completeness and null contamination
-///
-/// ## Examples
-/// ```rust,ignore
-/// use minarrow::IntegerArray;
-/// use simd_kernels::kernels::window::rolling_product_int;
-///
-/// let arr = IntegerArray::<i32>::from_slice(&[2, 3, 4, 5]);
-/// let result = rolling_product_int((&arr, 0, arr.len()), 2);
-/// ```
 #[inline]
 pub fn rolling_product_int<T: Num + Copy + One + Zero>(
     window: IntegerAVT<'_, T>,
@@ -331,18 +428,34 @@ pub fn rolling_product_int<T: Num + Copy + One + Zero>(
     let (arr, offset, len) = window;
     let data = &arr.data[offset..offset + len];
     let mask = arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len));
-    let (out, out_mask) = rolling_push_pop(
-        data,
-        mask.as_ref(),
-        subwindow,
-        |a, b| a * b,
-        |a, b| a / b,
-        T::one(),
-    );
+    let mut out = prealloc_vec::<T>(len);
+    let mut out_mask = new_null_mask(len);
+    rolling_product_int_to(data, mask.as_ref(), subwindow, &mut out, &mut out_mask);
     IntegerArray {
         data: out.into(),
         null_mask: Some(out_mask),
     }
+}
+
+/// Zero-allocation variant: writes directly to caller's output buffers.
+#[inline]
+pub fn rolling_product_float_to<T: Float + Copy + One + Zero>(
+    data: &[T],
+    mask: Option<&Bitmask>,
+    subwindow: usize,
+    out: &mut [T],
+    out_mask: &mut Bitmask,
+) {
+    rolling_push_pop_to(
+        data,
+        mask,
+        subwindow,
+        |a, b| a * b,
+        |a, b| a / b,
+        T::one(),
+        out,
+        out_mask,
+    );
 }
 
 /// Computes rolling products over floating-point data with IEEE 754 mathematical semantics.
@@ -350,25 +463,6 @@ pub fn rolling_product_int<T: Num + Copy + One + Zero>(
 /// Performs multiplicative aggregation using incremental computation strategies that
 /// maintain numerical precision through careful handling of special values (infinity,
 /// NaN, zero) according to IEEE 754 standards.
-///
-/// ## Parameters
-/// * `window` - Float array view containing multiplicands for window processing
-/// * `subwindow` - Window size determining number of values to multiply
-///
-/// ## Returns
-/// Returns a `FloatArray<T>` containing:
-/// - Rolling products computed with floating-point precision
-/// - Identity value (1.0) for incomplete window positions
-/// - Comprehensive null mask for validity tracking
-///
-/// ## Examples
-/// ```rust,ignore
-/// use minarrow::FloatArray;
-/// use simd_kernels::kernels::window::rolling_product_float;
-///
-/// let arr = FloatArray::<f64>::from_slice(&[1.5, 2.0, 3.0, 4.0]);
-/// let result = rolling_product_float((&arr, 0, arr.len()), 2);
-/// ```
 #[inline]
 pub fn rolling_product_float<T: Float + Copy + One + Zero>(
     window: FloatAVT<'_, T>,
@@ -377,17 +471,46 @@ pub fn rolling_product_float<T: Float + Copy + One + Zero>(
     let (arr, offset, len) = window;
     let data = &arr.data[offset..offset + len];
     let mask = arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len));
-    let (out, out_mask) = rolling_push_pop(
-        data,
-        mask.as_ref(),
-        subwindow,
-        |a, b| a * b,
-        |a, b| a / b,
-        T::one(),
-    );
+    let mut out = prealloc_vec::<T>(len);
+    let mut out_mask = new_null_mask(len);
+    rolling_product_float_to(data, mask.as_ref(), subwindow, &mut out, &mut out_mask);
     FloatArray {
         data: out.into(),
         null_mask: Some(out_mask),
+    }
+}
+
+/// Zero-allocation variant: writes directly to caller's output buffers.
+///
+/// Computes rolling logical AND over boolean data (pre-converted to i32: 1=true, 0=false).
+#[inline]
+pub fn rolling_product_bool_to(
+    data: &[i32],
+    mask: Option<&Bitmask>,
+    subwindow: usize,
+    out: &mut Bitmask,
+    out_mask: &mut Bitmask,
+) {
+    let n = data.len();
+    for i in 0..n {
+        let start = if i + 1 >= subwindow {
+            i + 1 - subwindow
+        } else {
+            0
+        };
+        let mut acc = true;
+        let mut valid = subwindow > 0 && i + 1 >= subwindow;
+        for j in start..=i {
+            let is_valid = mask.map_or(true, |m| unsafe { m.get_unchecked(j) });
+            if is_valid {
+                acc &= data[j] != 0;
+            } else {
+                valid = false;
+                break;
+            }
+        }
+        unsafe { out_mask.set_unchecked(i, valid) };
+        out.set(i, valid && acc);
     }
 }
 
@@ -396,25 +519,6 @@ pub fn rolling_product_float<T: Float + Copy + One + Zero>(
 /// Treats boolean multiplication as logical AND operations, computing the conjunction
 /// of all boolean values within each sliding window. Essential for constructing
 /// compound logical conditions and boolean pattern validation.
-///
-/// ## Parameters
-/// * `window` - Boolean array view containing logical values for conjunction
-/// * `subwindow` - Number of boolean values to AND together in each window
-///
-/// ## Returns
-/// Returns a `BooleanArray<()>` containing:
-/// - Logical AND results for each complete window position
-/// - False values for positions with incomplete windows
-/// - Null mask indicating window validity and null contamination
-///
-/// ## Examples
-/// ```rust,ignore
-/// use minarrow::BooleanArray;
-/// use simd_kernels::kernels::window::rolling_product_bool;
-///
-/// let bools = BooleanArray::from_slice(&[true, true, false, true]);
-/// let result = rolling_product_bool((&bools, 0, bools.len()), 2);
-/// ```
 #[inline]
 pub fn rolling_product_bool(window: BooleanAVT<'_, ()>, subwindow: usize) -> BooleanArray<()> {
     let (arr, offset, len) = window;
@@ -451,48 +555,19 @@ pub fn rolling_product_bool(window: BooleanAVT<'_, ()>, subwindow: usize) -> Boo
     }
 }
 
-/// Computes rolling arithmetic means over integer data with high-precision floating-point output.
-///
-/// Calculates moving averages across sliding windows, converting integer inputs to double-precision
-/// floating-point for accurate mean computation. Essential for time series analysis and statistical
-/// smoothing operations over integer sequences.
-///
-/// ## Parameters
-/// * `window` - Integer array view containing values for mean calculation
-/// * `subwindow` - Window size determining number of values to average
-///
-/// ## Returns
-/// Returns a `FloatArray<f64>` containing:
-/// - Rolling arithmetic means computed with double precision
-/// - Zero values for positions with incomplete windows
-/// - Null mask indicating window completeness and null contamination
-///
-/// ## Examples
-/// ```rust,ignore
-/// use minarrow::IntegerArray;
-/// use simd_kernels::kernels::window::rolling_mean_int;
-///
-/// let arr = IntegerArray::<i32>::from_slice(&[1, 2, 3, 4, 5]);
-/// let result = rolling_mean_int((&arr, 0, arr.len()), 3);
-/// ```
+/// Zero-allocation variant: writes directly to caller's output buffers.
 #[inline]
-pub fn rolling_mean_int<T: NumCast + Copy + Zero>(
-    window: IntegerAVT<'_, T>,
+pub fn rolling_mean_int_to<T: NumCast + Copy + Zero>(
+    data: &[T],
+    mask: Option<&Bitmask>,
     subwindow: usize,
-) -> FloatArray<f64> {
-    let (arr, offset, len) = window;
-    let n = len;
-    let mask_ref = arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len));
-    let mut out = prealloc_vec::<f64>(n);
-    let mut out_mask = new_null_mask(n);
-
+    out: &mut [f64],
+    out_mask: &mut Bitmask,
+) {
+    let n = data.len();
     if subwindow == 0 {
-        return FloatArray {
-            data: out.into(),
-            null_mask: Some(out_mask),
-        };
+        return;
     }
-
     for i in 0..n {
         if i + 1 < subwindow {
             unsafe { out_mask.set_unchecked(i, false) };
@@ -503,11 +578,8 @@ pub fn rolling_mean_int<T: NumCast + Copy + Zero>(
         let mut sum = 0.0;
         let mut valid = true;
         for j in start..=i {
-            if mask_ref
-                .as_ref()
-                .map_or(true, |m| unsafe { m.get_unchecked(j) })
-            {
-                sum += num_traits::cast(arr.data[offset + j]).unwrap_or(0.0);
+            if mask.map_or(true, |m| unsafe { m.get_unchecked(j) }) {
+                sum += num_traits::cast(data[j]).unwrap_or(0.0);
             } else {
                 valid = false;
                 break;
@@ -516,60 +588,43 @@ pub fn rolling_mean_int<T: NumCast + Copy + Zero>(
         unsafe { out_mask.set_unchecked(i, valid) };
         out[i] = if valid { sum / subwindow as f64 } else { 0.0 };
     }
-
     if subwindow > 0 && subwindow - 1 < out.len() {
         unsafe { out_mask.set_unchecked(subwindow - 1, false) };
         out[subwindow - 1] = 0.0;
     }
+}
 
+/// Computes rolling arithmetic means over integer data with high-precision floating-point output.
+#[inline]
+pub fn rolling_mean_int<T: NumCast + Copy + Zero>(
+    window: IntegerAVT<'_, T>,
+    subwindow: usize,
+) -> FloatArray<f64> {
+    let (arr, offset, len) = window;
+    let data = &arr.data[offset..offset + len];
+    let mask = arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len));
+    let mut out = prealloc_vec::<f64>(len);
+    let mut out_mask = new_null_mask(len);
+    rolling_mean_int_to(data, mask.as_ref(), subwindow, &mut out, &mut out_mask);
     FloatArray {
         data: out.into(),
         null_mask: Some(out_mask),
     }
 }
 
-/// Computes rolling arithmetic means over floating-point data with IEEE 754 compliance.
-///
-/// Performs moving average calculations across sliding windows while maintaining the original
-/// floating-point precision. Implements numerically stable summation strategies and proper
-/// handling of special floating-point values (NaN, infinity).
-///
-/// ## Parameters
-/// * `window` - Float array view containing values for mean calculation
-/// * `subwindow` - Window size specifying number of values to average
-///
-/// ## Returns
-/// Returns a `FloatArray<T>` containing:
-/// - Rolling arithmetic means preserving input precision (f32 or f64)
-/// - Zero values for positions with incomplete windows
-/// - Comprehensive null mask for validity indication
-///
-/// ## Examples
-/// ```rust,ignore
-/// use minarrow::FloatArray;
-/// use simd_kernels::kernels::window::rolling_mean_float;
-///
-/// let arr = FloatArray::<f32>::from_slice(&[1.5, 2.5, 3.5, 4.5]);
-/// let result = rolling_mean_float((&arr, 0, arr.len()), 2);
-/// ```
+/// Zero-allocation variant: writes directly to caller's output buffers.
 #[inline]
-pub fn rolling_mean_float<T: Float + Copy + Zero>(
-    window: FloatAVT<'_, T>,
+pub fn rolling_mean_float_to<T: Float + Copy + Zero>(
+    data: &[T],
+    mask: Option<&Bitmask>,
     subwindow: usize,
-) -> FloatArray<T> {
-    let (arr, offset, len) = window;
-    let n = len;
-    let mask_ref = arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len));
-    let mut out = prealloc_vec::<T>(n);
-    let mut out_mask = new_null_mask(n);
-
+    out: &mut [T],
+    out_mask: &mut Bitmask,
+) {
+    let n = data.len();
     if subwindow == 0 {
-        return FloatArray {
-            data: out.into(),
-            null_mask: Some(out_mask),
-        };
+        return;
     }
-
     for i in 0..n {
         if i + 1 < subwindow {
             unsafe { out_mask.set_unchecked(i, false) };
@@ -580,11 +635,8 @@ pub fn rolling_mean_float<T: Float + Copy + Zero>(
         let mut sum = T::zero();
         let mut valid = true;
         for j in start..=i {
-            if mask_ref
-                .as_ref()
-                .map_or(true, |m| unsafe { m.get_unchecked(j) })
-            {
-                sum = sum + arr.data[offset + j];
+            if mask.map_or(true, |m| unsafe { m.get_unchecked(j) }) {
+                sum = sum + data[j];
             } else {
                 valid = false;
                 break;
@@ -597,51 +649,55 @@ pub fn rolling_mean_float<T: Float + Copy + Zero>(
             T::zero()
         };
     }
-
     if subwindow > 0 && subwindow - 1 < out.len() {
         unsafe { out_mask.set_unchecked(subwindow - 1, false) };
         out[subwindow - 1] = T::zero();
     }
+}
 
+/// Computes rolling arithmetic means over floating-point data with IEEE 754 compliance.
+#[inline]
+pub fn rolling_mean_float<T: Float + Copy + Zero>(
+    window: FloatAVT<'_, T>,
+    subwindow: usize,
+) -> FloatArray<T> {
+    let (arr, offset, len) = window;
+    let data = &arr.data[offset..offset + len];
+    let mask = arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len));
+    let mut out = prealloc_vec::<T>(len);
+    let mut out_mask = new_null_mask(len);
+    rolling_mean_float_to(data, mask.as_ref(), subwindow, &mut out, &mut out_mask);
     FloatArray {
         data: out.into(),
         null_mask: Some(out_mask),
     }
 }
 
-/// For min, we skip that very first `window` slot so that
-/// the _first_ non-zero result appears one step later.
+/// Zero-allocation variant: writes directly to caller's output buffers.
+#[inline]
+pub fn rolling_min_int_to<T: Ord + Copy + Zero>(
+    data: &[T],
+    mask: Option<&Bitmask>,
+    subwindow: usize,
+    out: &mut [T],
+    out_mask: &mut Bitmask,
+) {
+    rolling_extreme_to(
+        data,
+        mask,
+        subwindow,
+        |a, b| a < b,
+        T::zero(),
+        out,
+        out_mask,
+    );
+    if subwindow > 0 && subwindow - 1 < out.len() {
+        out_mask.set(subwindow - 1, false);
+        out[subwindow - 1] = T::zero();
+    }
+}
+
 /// Computes rolling minimum values over integer data within sliding windows.
-///
-/// Identifies minimum values across sliding windows using efficient comparison strategies.
-/// Each output position represents the smallest value found within the preceding window,
-/// essential for trend analysis and outlier detection in integer sequences.
-///
-/// ## Parameters
-/// * `window` - Integer array view containing values for minimum detection
-/// * `subwindow` - Window size determining scope of minimum search
-///
-/// ## Returns
-/// Returns an `IntegerArray<T>` containing:
-/// - Rolling minimum values for each complete window position
-/// - Zero values for positions with incomplete windows
-/// - Null mask indicating window completeness and validity
-///
-/// ## Use Cases
-/// - **Trend analysis**: Identifying minimum trends in time series data
-/// - **Outlier detection**: Finding exceptionally low values within windows
-/// - **Signal processing**: Detecting minimum signal levels over time intervals
-/// - **Statistical analysis**: Computing rolling minimum statistics
-///
-/// ## Examples
-/// ```rust,ignore
-/// use minarrow::IntegerArray;
-/// use simd_kernels::kernels::window::rolling_min_int;
-///
-/// let arr = IntegerArray::<i32>::from_slice(&[5, 2, 8, 1, 9]);
-/// let result = rolling_min_int((&arr, 0, arr.len()), 3);
-/// // Output: [0, 0, 2, 1, 1] - minimum values in each 3-element window
-/// ```
 #[inline]
 pub fn rolling_min_int<T: Ord + Copy + Zero>(
     window: IntegerAVT<'_, T>,
@@ -650,49 +706,36 @@ pub fn rolling_min_int<T: Ord + Copy + Zero>(
     let (arr, offset, len) = window;
     let data = &arr.data[offset..offset + len];
     let mask = arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len));
-    let (mut out, mut out_mask) =
-        rolling_extreme(data, mask.as_ref(), subwindow, |a, b| a < b, T::zero());
-    if subwindow > 0 && subwindow - 1 < out.len() {
-        out_mask.set(subwindow - 1, false);
-        out[subwindow - 1] = T::zero();
-    }
+    let mut out = prealloc_vec::<T>(len);
+    let mut out_mask = new_null_mask(len);
+    rolling_min_int_to(data, mask.as_ref(), subwindow, &mut out, &mut out_mask);
     IntegerArray {
         data: out.into(),
         null_mask: Some(out_mask),
     }
 }
 
+/// Zero-allocation variant: writes directly to caller's output buffers.
+#[inline]
+pub fn rolling_max_int_to<T: Ord + Copy + Zero>(
+    data: &[T],
+    mask: Option<&Bitmask>,
+    subwindow: usize,
+    out: &mut [T],
+    out_mask: &mut Bitmask,
+) {
+    rolling_extreme_to(
+        data,
+        mask,
+        subwindow,
+        |a, b| a > b,
+        T::zero(),
+        out,
+        out_mask,
+    );
+}
+
 /// Computes rolling maximum values over integer data within sliding windows.
-///
-/// Identifies maximum values across sliding windows using efficient comparison operations.
-/// Each output position represents the largest value found within the preceding window,
-/// crucial for peak detection and trend analysis in integer data sequences.
-///
-/// ## Parameters
-/// * `window` - Integer array view containing values for maximum detection
-/// * `subwindow` - Window size determining scope of maximum search
-///
-/// ## Returns
-/// Returns an `IntegerArray<T>` containing:
-/// - Rolling maximum values for each complete window position
-/// - Zero values for positions with incomplete windows
-/// - Comprehensive null mask for validity tracking
-///
-/// ## Applications
-/// - **Peak detection**: Identifying maximum peaks in time series data
-/// - **Trend analysis**: Tracking maximum value trends over sliding intervals
-/// - **Threshold monitoring**: Detecting when maximum values exceed thresholds
-/// - **Signal analysis**: Finding maximum signal amplitudes in windows
-///
-/// ## Examples
-/// ```rust,ignore
-/// use minarrow::IntegerArray;
-/// use simd_kernels::kernels::window::rolling_max_int;
-///
-/// let arr = IntegerArray::<i32>::from_slice(&[3, 7, 2, 9, 4]);
-/// let result = rolling_max_int((&arr, 0, arr.len()), 3);
-/// // Output: [0, 0, 7, 9, 9] - maximum values in each 3-element window
-/// ```
 #[inline]
 pub fn rolling_max_int<T: Ord + Copy + Zero>(
     window: IntegerAVT<'_, T>,
@@ -701,44 +744,40 @@ pub fn rolling_max_int<T: Ord + Copy + Zero>(
     let (arr, offset, len) = window;
     let data = &arr.data[offset..offset + len];
     let mask = arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len));
-    let (out, out_mask) = rolling_extreme(data, mask.as_ref(), subwindow, |a, b| a > b, T::zero());
+    let mut out = prealloc_vec::<T>(len);
+    let mut out_mask = new_null_mask(len);
+    rolling_max_int_to(data, mask.as_ref(), subwindow, &mut out, &mut out_mask);
     IntegerArray {
         data: out.into(),
         null_mask: Some(out_mask),
     }
 }
 
+/// Zero-allocation variant: writes directly to caller's output buffers.
+#[inline]
+pub fn rolling_min_float_to<T: Float + Copy + Zero>(
+    data: &[T],
+    mask: Option<&Bitmask>,
+    subwindow: usize,
+    out: &mut [T],
+    out_mask: &mut Bitmask,
+) {
+    rolling_extreme_to(
+        data,
+        mask,
+        subwindow,
+        |a, b| a < b,
+        T::zero(),
+        out,
+        out_mask,
+    );
+    if subwindow > 0 && subwindow - 1 < out.len() {
+        out_mask.set(subwindow - 1, false);
+        out[subwindow - 1] = T::zero();
+    }
+}
+
 /// Computes rolling minimum values over floating-point data with IEEE 754 compliance.
-///
-/// Identifies minimum floating-point values across sliding windows while properly handling
-/// special values (NaN, infinity) according to IEEE 754 standards. Essential for numerical
-/// analysis requiring precise minimum detection in floating-point sequences.
-///
-/// ## Parameters
-/// * `window` - Float array view containing values for minimum computation
-/// * `subwindow` - Window size determining minimum search scope
-///
-/// ## Returns
-/// Returns a `FloatArray<T>` containing:
-/// - Rolling minimum values computed with floating-point precision
-/// - Zero values for positions with incomplete windows
-/// - Null mask reflecting window validity and special value handling
-///
-/// ## Applications
-/// - **Scientific computing**: Finding minimum values in numerical simulations
-/// - **Signal processing**: Detecting minimum signal levels with high precision
-/// - **Financial analysis**: Identifying minimum prices in sliding time windows
-/// - **Data analysis**: Computing rolling minimum statistics for trend detection
-///
-/// ## Examples
-/// ```rust,ignore
-/// use minarrow::FloatArray;
-/// use simd_kernels::kernels::window::rolling_min_float;
-///
-/// let arr = FloatArray::<f64>::from_slice(&[3.14, 2.71, 1.41, 1.73]);
-/// let result = rolling_min_float((&arr, 0, arr.len()), 2);
-/// // Output: [0.0, 0.0, 2.71, 1.41] - minimum values in 2-element windows
-/// ```
 #[inline]
 pub fn rolling_min_float<T: Float + Copy + Zero>(
     window: FloatAVT<'_, T>,
@@ -747,48 +786,36 @@ pub fn rolling_min_float<T: Float + Copy + Zero>(
     let (arr, offset, len) = window;
     let data = &arr.data[offset..offset + len];
     let mask = arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len));
-    let (mut out, mut out_mask) =
-        rolling_extreme(data, mask.as_ref(), subwindow, |a, b| a < b, T::zero());
-    if subwindow > 0 && subwindow - 1 < out.len() {
-        out_mask.set(subwindow - 1, false);
-        out[subwindow - 1] = T::zero();
-    }
+    let mut out = prealloc_vec::<T>(len);
+    let mut out_mask = new_null_mask(len);
+    rolling_min_float_to(data, mask.as_ref(), subwindow, &mut out, &mut out_mask);
     FloatArray {
         data: out.into(),
         null_mask: Some(out_mask),
     }
 }
 
+/// Zero-allocation variant: writes directly to caller's output buffers.
+#[inline]
+pub fn rolling_max_float_to<T: Float + Copy + Zero>(
+    data: &[T],
+    mask: Option<&Bitmask>,
+    subwindow: usize,
+    out: &mut [T],
+    out_mask: &mut Bitmask,
+) {
+    rolling_extreme_to(
+        data,
+        mask,
+        subwindow,
+        |a, b| a > b,
+        T::zero(),
+        out,
+        out_mask,
+    );
+}
+
 /// Computes rolling maximum values over floating-point data with IEEE 754 compliance.
-///
-/// Identifies maximum floating-point values across sliding windows while maintaining
-/// strict adherence to IEEE 754 comparison semantics. Handles special floating-point
-/// values (NaN, infinity) correctly for reliable maximum detection.
-///
-/// ## Parameters
-/// * `window` - Float array view containing values for maximum computation
-/// * `subwindow` - Window size specifying maximum search scope
-///
-/// ## Returns
-/// Returns a `FloatArray<T>` containing:
-/// - Rolling maximum values with full floating-point precision
-/// - Zero values for positions with incomplete windows
-/// - Comprehensive null mask for result validity indication
-///
-/// ## Applications
-/// - **Peak detection**: Identifying maximum peaks in continuous data streams
-/// - **Envelope detection**: Computing upper envelopes of signal data
-/// - **Risk analysis**: Finding maximum risk values in financial time series
-/// - **Scientific measurement**: Detecting maximum readings in sensor data
-///
-/// ## Examples
-/// ```rust,ignore
-/// use minarrow::FloatArray;
-/// use simd_kernels::kernels::window::rolling_max_float;
-///
-/// let arr = FloatArray::<f32>::from_slice(&[1.5, 3.2, 2.1, 4.7]);
-/// let result = rolling_max_float((&arr, 0, arr.len()), 2);
-/// ```
 #[inline]
 pub fn rolling_max_float<T: Float + Copy + Zero>(
     window: FloatAVT<'_, T>,
@@ -797,7 +824,9 @@ pub fn rolling_max_float<T: Float + Copy + Zero>(
     let (arr, offset, len) = window;
     let data = &arr.data[offset..offset + len];
     let mask = arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len));
-    let (out, out_mask) = rolling_extreme(data, mask.as_ref(), subwindow, |a, b| a > b, T::zero());
+    let mut out = prealloc_vec::<T>(len);
+    let mut out_mask = new_null_mask(len);
+    rolling_max_float_to(data, mask.as_ref(), subwindow, &mut out, &mut out_mask);
     FloatArray {
         data: out.into(),
         null_mask: Some(out_mask),
@@ -1271,6 +1300,36 @@ pub fn dense_rank_str<T: Integer>(arr: StringAVT<T>) -> Result<IntegerArray<i32>
 
 // Lag / Lead / Shift kernels
 
+/// Zero-allocation variant: writes directly to caller's output buffers.
+///
+/// Panics if `out.len() != len`.
+#[inline(always)]
+fn shift_with_bounds_to<T: Copy>(
+    data: &[T],
+    mask: Option<&Bitmask>,
+    len: usize,
+    offset_fn: impl Fn(usize) -> Option<usize>,
+    default: T,
+    out: &mut [T],
+    out_mask: &mut Bitmask,
+) {
+    assert_eq!(
+        len,
+        out.len(),
+        "shift_with_bounds_to: input/output length mismatch"
+    );
+    for i in 0..len {
+        if let Some(j) = offset_fn(i) {
+            out[i] = data[j];
+            let is_valid = mask.map_or(true, |m| unsafe { m.get_unchecked(j) });
+            unsafe { out_mask.set_unchecked(i, is_valid) };
+        } else {
+            out[i] = default;
+        }
+    }
+}
+
+/// Allocating variant: creates new output buffers internally.
 #[inline(always)]
 fn shift_with_bounds<T: Copy>(
     data: &[T],
@@ -1281,15 +1340,7 @@ fn shift_with_bounds<T: Copy>(
 ) -> (Vec64<T>, Bitmask) {
     let mut out = prealloc_vec::<T>(len);
     let mut out_mask = Bitmask::new_set_all(len, false);
-    for i in 0..len {
-        if let Some(j) = offset_fn(i) {
-            out[i] = data[j];
-            let is_valid = mask.map_or(true, |m| unsafe { m.get_unchecked(j) });
-            unsafe { out_mask.set_unchecked(i, is_valid) };
-        } else {
-            out[i] = default;
-        }
-    }
+    shift_with_bounds_to(data, mask, len, offset_fn, default, &mut out, &mut out_mask);
     (out, out_mask)
 }
 
@@ -1381,25 +1432,38 @@ fn shift_str_with_bounds<T: Integer>(
 /// let arr = IntegerArray::<i32>::from_slice(&[10, 20, 30, 40]);
 /// let result = lag_int((&arr, 0, arr.len()), 1);
 /// ```
+/// Zero-allocation variant: writes directly to caller's output buffers.
+#[inline]
+pub fn lag_int_to<T: Copy + Default>(
+    data: &[T],
+    mask: Option<&Bitmask>,
+    n: usize,
+    out: &mut [T],
+    out_mask: &mut Bitmask,
+) {
+    let len = data.len();
+    shift_with_bounds_to(
+        data,
+        mask,
+        len,
+        |i| if i >= n { Some(i - n) } else { None },
+        T::default(),
+        out,
+        out_mask,
+    );
+}
+
 #[inline]
 pub fn lag_int<T: Copy + Default>(window: IntegerAVT<T>, n: usize) -> IntegerArray<T> {
     let (arr, offset, len) = window;
     let data_window = &arr.data[offset..offset + len];
-    let mask_window = if len != arr.data.len() {
-        arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len))
-    } else {
-        arr.null_mask.clone()
-    };
-    let (data, null_mask) = shift_with_bounds(
-        data_window,
-        mask_window.as_ref(),
-        len,
-        |i| if i >= n { Some(i - n) } else { None },
-        T::default(),
-    );
+    let mask = arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len));
+    let mut out = prealloc_vec::<T>(len);
+    let mut out_mask = Bitmask::new_set_all(len, false);
+    lag_int_to(data_window, mask.as_ref(), n, &mut out, &mut out_mask);
     IntegerArray {
-        data: data.into(),
-        null_mask: Some(null_mask),
+        data: out.into(),
+        null_mask: Some(out_mask),
     }
 }
 
@@ -1427,52 +1491,63 @@ pub fn lag_int<T: Copy + Default>(window: IntegerAVT<T>, n: usize) -> IntegerArr
 /// let arr = IntegerArray::<i32>::from_slice(&[10, 20, 30, 40]);
 /// let result = lead_int((&arr, 0, arr.len()), 2);
 /// ```
+/// Zero-allocation variant: writes directly to caller's output buffers.
+#[inline]
+pub fn lead_int_to<T: Copy + Default>(
+    data: &[T],
+    mask: Option<&Bitmask>,
+    n: usize,
+    out: &mut [T],
+    out_mask: &mut Bitmask,
+) {
+    let len = data.len();
+    shift_with_bounds_to(
+        data,
+        mask,
+        len,
+        |i| if i + n < len { Some(i + n) } else { None },
+        T::default(),
+        out,
+        out_mask,
+    );
+}
+
 #[inline]
 pub fn lead_int<T: Copy + Default>(window: IntegerAVT<T>, n: usize) -> IntegerArray<T> {
     let (arr, offset, len) = window;
     let data_window = &arr.data[offset..offset + len];
-    let mask_window = if len != arr.data.len() {
-        arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len))
-    } else {
-        arr.null_mask.clone()
-    };
-    let (data, null_mask) = shift_with_bounds(
-        data_window,
-        mask_window.as_ref(),
-        len,
-        |i| if i + n < len { Some(i + n) } else { None },
-        T::default(),
-    );
+    let mask = arr.null_mask.as_ref().map(|m| m.slice_clone(offset, len));
+    let mut out = prealloc_vec::<T>(len);
+    let mut out_mask = Bitmask::new_set_all(len, false);
+    lead_int_to(data_window, mask.as_ref(), n, &mut out, &mut out_mask);
     IntegerArray {
-        data: data.into(),
-        null_mask: Some(null_mask),
+        data: out.into(),
+        null_mask: Some(out_mask),
     }
 }
 
+/// Zero-allocation variant: writes directly to caller's output buffers.
+#[inline]
+pub fn lag_float_to<T: Copy + num_traits::Zero>(
+    data: &[T],
+    mask: Option<&Bitmask>,
+    n: usize,
+    out: &mut [T],
+    out_mask: &mut Bitmask,
+) {
+    let len = data.len();
+    shift_with_bounds_to(
+        data,
+        mask,
+        len,
+        |i| if i >= n { Some(i - n) } else { None },
+        T::zero(),
+        out,
+        out_mask,
+    );
+}
+
 /// Accesses values from previous positions in floating-point arrays with IEEE 754 compliance.
-///
-/// Implements SQL LAG() function for floating-point data, retrieving values from earlier
-/// positions while maintaining IEEE 754 semantics for special values (NaN, infinity).
-/// Critical for time series analysis and numerical sequence processing.
-///
-/// ## Parameters
-/// * `window` - Float array view containing sequential floating-point data
-/// * `n` - Lag offset specifying backward position distance
-///
-/// ## Returns
-/// Returns a `FloatArray<T>` containing:
-/// - Floating-point values from n positions earlier
-/// - Zero values for positions with insufficient history
-/// - Null mask reflecting lag validity and special value handling
-///
-/// ## Examples
-/// ```rust,ignore
-/// use minarrow::FloatArray;
-/// use simd_kernels::kernels::window::lag_float;
-///
-/// let arr = FloatArray::<f64>::from_slice(&[1.0, 2.5, 3.14, 4.7]);
-/// let result = lag_float((&arr, 0, arr.len()), 1);
-/// ```
 #[inline]
 pub fn lag_float<T: Copy + num_traits::Zero>(window: FloatAVT<T>, n: usize) -> FloatArray<T> {
     let (arr, offset, len) = window;

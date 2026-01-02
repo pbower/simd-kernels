@@ -1,24 +1,27 @@
 // Copyright Peter Bower 2025. All Rights Reserved.
 // Licensed under Mozilla Public License (MPL) 2.0.
 
-use minarrow::{Bitmask, FloatArray};
+use minarrow::{Bitmask, FloatArray, Vec64};
 
 use crate::kernels::scientific::distributions::univariate::common::std::{
-    dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
+    dense_univariate_kernel_f64_std, dense_univariate_kernel_f64_std_to,
+    masked_univariate_kernel_f64_std, masked_univariate_kernel_f64_std_to,
 };
 use crate::utils::has_nulls;
 use minarrow::enums::error::KernelError;
 
-/// Laplace (double-exponential) distribution PDF, null-aware and SIMD-accelerated.
-/// f(x; μ, b) = (1 / (2b)) · exp(−|x − μ| / b)
+/// Laplace PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
 #[inline(always)]
-pub fn laplace_pdf_std(
+pub fn laplace_pdf_std_to(
     x: &[f64],
     location: f64,
     scale: f64,
+    output: &mut [f64],
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Result<FloatArray<f64>, KernelError> {
+) -> Result<(), KernelError> {
     // Parameter checks
     if !location.is_finite() || !(scale > 0.0 && scale.is_finite()) {
         return Err(KernelError::InvalidArguments(
@@ -26,7 +29,7 @@ pub fn laplace_pdf_std(
         ));
     }
     if x.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     let inv_b = 1.0 / scale;
@@ -39,36 +42,60 @@ pub fn laplace_pdf_std(
 
     // Dense fast path (no nulls)
     if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        return Ok(());
     }
 
     // Null-aware masked path
     let mask_ref = null_mask.expect("laplace_pdf: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
 
-    let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(())
 }
 
-/// Laplace (double-exponential) distribution CDF, null-aware and SIMD-accelerated.
-/// F(x; μ, b) = 0.5·exp((x−μ)/b)          if x < μ
-///           = 1 − 0.5·exp(−(x−μ)/b)     if x ≥ μ
+/// Laplace (double-exponential) distribution PDF, null-aware and SIMD-accelerated.
+/// f(x; μ, b) = (1 / (2b)) · exp(−|x − μ| / b)
 #[inline(always)]
-pub fn laplace_cdf_std(
+pub fn laplace_pdf_std(
     x: &[f64],
     location: f64,
     scale: f64,
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    laplace_pdf_std_to(
+        x,
+        location,
+        scale,
+        out.as_mut_slice(),
+        null_mask,
+        null_count,
+    )?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Laplace CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn laplace_cdf_std_to(
+    x: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     // Parameter checks
     if !location.is_finite() || !(scale > 0.0 && scale.is_finite()) {
         return Err(KernelError::InvalidArguments(
@@ -76,7 +103,7 @@ pub fn laplace_cdf_std(
         ));
     }
     if x.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     let inv_b = 1.0 / scale;
@@ -92,36 +119,61 @@ pub fn laplace_cdf_std(
 
     // Dense fast path (no nulls)
     if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        return Ok(());
     }
 
     // Null-aware masked path
     let mask_ref = null_mask.expect("laplace_cdf: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
 
-    let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(())
 }
 
-/// Laplace quantile (inverse CDF), null-aware and SIMD-accelerated.
-/// Q(p; μ, b) = μ + b·ln(2p)           if p < 0.5
-///           = μ − b·ln(2(1−p))       if p ≥ 0.5
+/// Laplace (double-exponential) distribution CDF, null-aware and SIMD-accelerated.
+/// F(x; μ, b) = 0.5·exp((x−μ)/b)          if x < μ
+///           = 1 − 0.5·exp(−(x−μ)/b)     if x ≥ μ
 #[inline(always)]
-pub fn laplace_quantile_std(
-    p: &[f64],
+pub fn laplace_cdf_std(
+    x: &[f64],
     location: f64,
     scale: f64,
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    laplace_cdf_std_to(
+        x,
+        location,
+        scale,
+        out.as_mut_slice(),
+        null_mask,
+        null_count,
+    )?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Laplace quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn laplace_quantile_std_to(
+    p: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     // Parameter checks
     if !location.is_finite() || !(scale > 0.0 && scale.is_finite()) {
         return Err(KernelError::InvalidArguments(
@@ -129,7 +181,7 @@ pub fn laplace_quantile_std(
         ));
     }
     if p.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     let scalar_body = move |pi: f64| -> f64 {
@@ -150,20 +202,45 @@ pub fn laplace_quantile_std(
 
     // Dense fast path
     if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(p, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        dense_univariate_kernel_f64_std_to(p, output, scalar_body);
+        return Ok(());
     }
 
     // Null-aware masked path
     let mask_ref = null_mask.expect("laplace_quantile: null_count > 0 requires null_mask");
-    let (data, out_mask) = masked_univariate_kernel_f64_std(p, mask_ref, scalar_body);
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(p, mask_ref, output, &mut out_mask, scalar_body);
 
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(())
+}
+
+/// Laplace quantile (inverse CDF), null-aware and SIMD-accelerated.
+/// Q(p; μ, b) = μ + b·ln(2p)           if p < 0.5
+///           = μ − b·ln(2(1−p))       if p ≥ 0.5
+#[inline(always)]
+pub fn laplace_quantile_std(
+    p: &[f64],
+    location: f64,
+    scale: f64,
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<FloatArray<f64>, KernelError> {
+    let len = p.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    laplace_quantile_std_to(
+        p,
+        location,
+        scale,
+        out.as_mut_slice(),
+        null_mask,
+        null_count,
+    )?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

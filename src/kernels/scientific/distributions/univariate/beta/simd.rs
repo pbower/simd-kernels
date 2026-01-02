@@ -14,33 +14,33 @@ use std::simd::{Simd, StdFloat};
 
 use crate::kernels::scientific::distributions::shared::scalar::*;
 use crate::kernels::scientific::distributions::univariate::common::simd::{
-    dense_univariate_kernel_f64_simd, masked_univariate_kernel_f64_simd,
+    dense_univariate_kernel_f64_simd_to, masked_univariate_kernel_f64_simd_to,
 };
 use crate::kernels::scientific::distributions::univariate::common::std::{
-    dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
+    dense_univariate_kernel_f64_std_to, masked_univariate_kernel_f64_std_to,
 };
 use crate::utils::has_nulls;
 use minarrow::enums::error::KernelError;
 
-/// SIMD-accelerated implementation of beta distribution probability density function.
+/// SIMD-accelerated implementation of beta distribution PDF (zero-allocation variant).
 ///
-/// Processes multiple PDF evaluations simultaneously using vectorised operations
-/// for improved performance on large datasets with 64-byte memory alignment.
+/// Writes directly to caller-provided output buffer.
 #[inline(always)]
-pub fn beta_pdf_simd(
+pub fn beta_pdf_simd_to(
     x: &[f64],
     alpha: f64,
     beta: f64,
+    output: &mut [f64],
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Result<FloatArray<f64>, KernelError> {
+) -> Result<(), KernelError> {
     if alpha <= 0.0 || beta <= 0.0 || !alpha.is_finite() || !beta.is_finite() {
         return Err(KernelError::InvalidArguments(
             "beta_pdf: invalid alpha or beta".into(),
         ));
     }
     if x.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     const N: usize = W64;
@@ -115,65 +115,82 @@ pub fn beta_pdf_simd(
     if !has_nulls(null_count, null_mask) {
         // Check if arrays are SIMD 64-byte aligned
         if is_simd_aligned(x) {
-            let (out, out_mask) = dense_univariate_kernel_f64_simd::<N, _, _>(
-                x,
-                null_mask.is_some(),
-                simd_body,
-                scalar_body,
-            );
-            return Ok(FloatArray {
-                data: out.into(),
-                null_mask: out_mask,
-            });
+            dense_univariate_kernel_f64_simd_to::<N, _, _>(x, output, simd_body, scalar_body);
+            return Ok(());
         }
 
         // Scalar fallback - alignment check failed
-        let (out, out_mask) = dense_univariate_kernel_f64_std(x, null_mask.is_some(), scalar_body);
-        return Ok(FloatArray {
-            data: out.into(),
-            null_mask: out_mask,
-        });
+        dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        return Ok(());
     }
 
     // Null-aware masked path
     let mask = null_mask.expect("null_count > 0 requires null_mask");
+    let mut out_mask = mask.clone();
 
     // Check if arrays are 64-byte aligned for SIMD
     if is_simd_aligned(x) {
-        let (out, out_mask) =
-            masked_univariate_kernel_f64_simd::<N, _, _>(x, mask, simd_body, scalar_body);
-        return Ok(FloatArray {
-            data: out.into(),
-            null_mask: Some(out_mask),
-        });
+        masked_univariate_kernel_f64_simd_to::<N, _, _>(
+            x,
+            mask,
+            output,
+            &mut out_mask,
+            simd_body,
+            scalar_body,
+        );
+        return Ok(());
     }
 
     // Scalar fallback - alignment check failed
-    let (out, out_mask) = masked_univariate_kernel_f64_std(x, mask, scalar_body);
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(out_mask),
-    })
+    masked_univariate_kernel_f64_std_to(x, mask, output, &mut out_mask, scalar_body);
+    Ok(())
 }
 
-/// SIMD-accelerated implementation of beta distribution cumulative distribution function.
-use core::simd::{LaneCount, Mask, SupportedLaneCount};
-
+/// SIMD-accelerated implementation of beta distribution probability density function.
+///
+/// Processes multiple PDF evaluations simultaneously using vectorised operations
+/// for improved performance on large datasets with 64-byte memory alignment.
 #[inline(always)]
-pub fn beta_cdf_simd(
+pub fn beta_pdf_simd(
     x: &[f64],
     alpha: f64,
     beta: f64,
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    beta_pdf_simd_to(x, alpha, beta, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// SIMD-accelerated implementation of beta distribution CDF (zero-allocation variant).
+use core::simd::{LaneCount, Mask, SupportedLaneCount};
+
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn beta_cdf_simd_to(
+    x: &[f64],
+    alpha: f64,
+    beta: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     if alpha <= 0.0 || beta <= 0.0 || !alpha.is_finite() || !beta.is_finite() {
         return Err(KernelError::InvalidArguments(
             "beta_cdf: invalid alpha or beta".into(),
         ));
     }
     if x.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     const N: usize = W64;
@@ -191,19 +208,21 @@ pub fn beta_cdf_simd(
 
     // Fast path with no nulls
     if !has_nulls(null_count, null_mask) {
-        let mut out = Vec64::with_capacity(x.len());
-        for &xi in x {
-            out.push(scalar_body(xi, alpha, beta));
+        for (i, &xi) in x.iter().enumerate() {
+            output[i] = scalar_body(xi, alpha, beta);
         }
-        return Ok(FloatArray::from_vec64(out, null_mask.cloned()));
+        return Ok(());
     }
 
     // Null-aware masked SIMD path
     let mask = null_mask.expect("null_count > 0 requires null_mask");
+    let mut out_mask = mask.clone();
 
-    let (out, out_mask) = masked_univariate_kernel_f64_simd::<N, _, _>(
+    masked_univariate_kernel_f64_simd_to::<N, _, _>(
         x,
         mask,
+        output,
+        &mut out_mask,
         |x_v| {
             // Vectorised regularised incomplete beta with boundary handling.
             incomplete_beta_simd::<N>(alpha, beta, x_v)
@@ -211,10 +230,29 @@ pub fn beta_cdf_simd(
         |xi| scalar_body(xi, alpha, beta),
     );
 
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(())
+}
+
+/// SIMD-accelerated implementation of beta distribution cumulative distribution function.
+#[inline(always)]
+pub fn beta_cdf_simd(
+    x: &[f64],
+    alpha: f64,
+    beta: f64,
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<FloatArray<f64>, KernelError> {
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    beta_cdf_simd_to(x, alpha, beta, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }
 
 /// Vectorised regularised incomplete beta I_x(a,b).

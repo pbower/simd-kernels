@@ -28,6 +28,70 @@ mod std;
 use minarrow::enums::error::KernelError;
 use minarrow::{Bitmask, FloatArray};
 
+/// Lognormal PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// f(x|μ,σ) = 1/(xσ√2π) * exp(-½[(ln(x)-μ)/σ]^2)
+#[inline(always)]
+pub fn lognormal_pdf_to(
+    x: &[f64],
+    meanlog: f64,
+    sdlog: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::lognormal_pdf_simd_to(x, meanlog, sdlog, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::lognormal_pdf_std_to(x, meanlog, sdlog, output, null_mask, null_count)
+    }
+}
+
+/// Lognormal CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// F(x|μ,σ) = Φ((ln(x) - μ)/σ)
+#[inline(always)]
+pub fn lognormal_cdf_to(
+    x: &[f64],
+    meanlog: f64,
+    sdlog: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::lognormal_cdf_simd_to(x, meanlog, sdlog, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::lognormal_cdf_std_to(x, meanlog, sdlog, output, null_mask, null_count)
+    }
+}
+
+/// Lognormal quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// Q(p|μ,σ) = exp(μ + σ * Φ⁻¹(p)), p in (0,1)
+#[inline(always)]
+pub fn lognormal_quantile_to(
+    p: &[f64],
+    meanlog: f64,
+    sdlog: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::lognormal_quantile_std_to(p, meanlog, sdlog, output, null_mask, null_count)
+}
+
 /// Compute the probability density function (PDF) for the lognormal distribution.
 ///
 /// The lognormal distribution is a continuous probability distribution of a random variable

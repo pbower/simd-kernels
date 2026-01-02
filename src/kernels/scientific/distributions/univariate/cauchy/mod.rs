@@ -170,6 +170,66 @@ pub fn cauchy_quantile(
     std::cauchy_quantile_std(p, location, scale, null_mask, null_count)
 }
 
+// ============================================================================
+// Zero-allocation variants
+// ============================================================================
+
+/// Cauchy PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// f(x; x₀, γ) = (1/π) × [γ / ((x - x₀)² + γ²)]
+#[inline(always)]
+pub fn cauchy_pdf_to(
+    x: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::cauchy_pdf_simd_to(x, location, scale, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::cauchy_pdf_std_to(x, location, scale, output, null_mask, null_count)
+    }
+}
+
+/// Cauchy CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// F(x; x₀, γ) = (1/2) + (1/π) × arctan((x - x₀)/γ)
+#[inline(always)]
+pub fn cauchy_cdf_to(
+    x: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::cauchy_cdf_std_to(x, location, scale, output, null_mask, null_count)
+}
+
+/// Cauchy quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// Q(p; x₀, γ) = x₀ + γ × tan(π × (p - 1/2))
+#[inline(always)]
+pub fn cauchy_quantile_to(
+    p: &[f64],
+    location: f64,
+    scale: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::cauchy_quantile_std_to(p, location, scale, output, null_mask, null_count)
+}
+
 #[cfg(test)]
 mod cauchy_tests {
     use ::std::f64::consts::PI;
