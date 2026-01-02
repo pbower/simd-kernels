@@ -687,17 +687,22 @@ pub fn cmp_bitmask_std(
 // String and dictionary
 
 macro_rules! impl_cmp_utf8_slice {
-    ($fn_name:ident, $lhs_slice:ty, $rhs_slice:ty, [$($gen:tt)+]) => {
+    ($fn_name:ident, $fn_name_to:ident, $lhs_slice:ty, $rhs_slice:ty, [$($gen:tt)+]) => {
+        /// Zero-allocation variant: writes directly to caller's output buffer.
+        ///
         /// Compare UTF-8 string or dictionary arrays using the specified comparison operator.
+        /// The output Bitmask must have capacity >= llen.
         #[inline(always)]
-        pub fn $fn_name<$($gen)+>(
+        pub fn $fn_name_to<$($gen)+>(
             lhs: $lhs_slice,
             rhs: $rhs_slice,
             op: ComparisonOperator,
-        ) -> Result<BooleanArray<()>, KernelError> {
+            output: &mut Bitmask,
+        ) -> Result<(), KernelError> {
             let (larr, loff, llen) = lhs;
             let (rarr, roff, rlen) = rhs;
             confirm_equal_len("compare string/dict length mismatch (slice contract)", llen, rlen)?;
+            assert!(output.capacity() >= llen, concat!(stringify!($fn_name_to), ": output capacity too small"));
 
             let lhs_mask = larr.null_mask.as_ref().map(|m| m.slice_clone(loff, llen));
             let rhs_mask = rarr.null_mask.as_ref().map(|m| m.slice_clone(roff, rlen));
@@ -726,7 +731,6 @@ macro_rules! impl_cmp_utf8_slice {
             }
 
             let has_nulls = lhs_mask.is_some() || rhs_mask.is_some();
-            let mut out = new_bool_bitmask(llen);
             for i in 0..llen {
                 if has_nulls
                     && !(lhs_mask.as_ref().map_or(true, |m| unsafe { m.get_unchecked(i) })
@@ -746,9 +750,25 @@ macro_rules! impl_cmp_utf8_slice {
                     _ => false,
                 };
                 if res {
-                    out.set(i, true);
+                    output.set(i, true);
                 }
             }
+            Ok(())
+        }
+
+        /// Compare UTF-8 string or dictionary arrays using the specified comparison operator.
+        #[inline(always)]
+        pub fn $fn_name<$($gen)+>(
+            lhs: $lhs_slice,
+            rhs: $rhs_slice,
+            op: ComparisonOperator,
+        ) -> Result<BooleanArray<()>, KernelError> {
+            let (larr, loff, llen) = lhs;
+            let (rarr, roff, _) = rhs;
+            let lhs_mask = larr.null_mask.as_ref().map(|m| m.slice_clone(loff, llen));
+            let rhs_mask = rarr.null_mask.as_ref().map(|m| m.slice_clone(roff, llen));
+            let mut out = new_bool_bitmask(llen);
+            $fn_name_to((larr, loff, llen), (rarr, roff, llen), op, &mut out)?;
             let null_mask = merge_bitmasks_to_new(lhs_mask.as_ref(), rhs_mask.as_ref(), llen);
             Ok(BooleanArray { data: out.into(), null_mask, len: llen, _phantom: PhantomData })
         }
@@ -761,10 +781,10 @@ impl_cmp_numeric!(cmp_i64, cmp_i64_to, i64, W64, i64);
 impl_cmp_numeric!(cmp_u64, cmp_u64_to, u64, W64, i64);
 impl_cmp_numeric!(cmp_f32, cmp_f32_to, f32, W32, i32);
 impl_cmp_numeric!(cmp_f64, cmp_f64_to, f64, W64, i64);
-impl_cmp_utf8_slice!(cmp_str_str,   StringAVT<'a, T>,     StringAVT<'a, T>,      [ 'a, T: Integer ]);
-impl_cmp_utf8_slice!(cmp_str_dict,  StringAVT<'a, T>,     CategoricalAVT<'a, U>,      [ 'a, T: Integer, U: Integer ]);
-impl_cmp_utf8_slice!(cmp_dict_str,  CategoricalAVT<'a, T>,     StringAVT<'a, U>,      [ 'a, T: Integer, U: Integer ]);
-impl_cmp_utf8_slice!(cmp_dict_dict, CategoricalAVT<'a, T>,     CategoricalAVT<'a, T>,      [ 'a, T: Integer ]);
+impl_cmp_utf8_slice!(cmp_str_str,   cmp_str_str_to,   StringAVT<'a, T>,     StringAVT<'a, T>,      [ 'a, T: Integer ]);
+impl_cmp_utf8_slice!(cmp_str_dict,  cmp_str_dict_to,  StringAVT<'a, T>,     CategoricalAVT<'a, U>,      [ 'a, T: Integer, U: Integer ]);
+impl_cmp_utf8_slice!(cmp_dict_str,  cmp_dict_str_to,  CategoricalAVT<'a, T>,     StringAVT<'a, U>,      [ 'a, T: Integer, U: Integer ]);
+impl_cmp_utf8_slice!(cmp_dict_dict, cmp_dict_dict_to, CategoricalAVT<'a, T>,     CategoricalAVT<'a, T>,      [ 'a, T: Integer ]);
 
 #[cfg(test)]
 mod tests {
