@@ -41,6 +41,28 @@ mod std;
 use minarrow::enums::error::KernelError;
 use minarrow::{Bitmask, FloatArray};
 
+/// Student-t PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn student_t_pdf_to(
+    x: &[f64],
+    df: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::student_t_pdf_simd_to(x, df, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::student_t_pdf_std_to(x, df, output, null_mask, null_count)
+    }
+}
+
 /// Student‐t PDF
 #[inline(always)]
 pub fn student_t_pdf(
@@ -60,6 +82,20 @@ pub fn student_t_pdf(
     }
 }
 
+/// Student-t CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn student_t_cdf_to(
+    x: &[f64],
+    df: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::student_t_cdf_std_to(x, df, output, null_mask, null_count)
+}
+
 /// Student-t CDF: see
 /// - Algorithm AS 3 (Hill, 1970) / Algorithm 395 (G. W. Hill, 1970)
 /// - https://www.jstor.org/stable/2346841
@@ -74,6 +110,20 @@ pub fn student_t_cdf(
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
     std::student_t_cdf_std(x, df, null_mask, null_count)
+}
+
+/// Student-t quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn student_t_quantile_to(
+    p: &[f64],
+    df: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::student_t_quantile_std_to(p, df, output, null_mask, null_count)
 }
 
 /// Student-t quantile (inverse CDF), using the AS 241 algorithm

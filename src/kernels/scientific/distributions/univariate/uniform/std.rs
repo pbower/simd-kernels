@@ -5,32 +5,33 @@
 //!
 //! Scalar implementations of uniform distribution functions.
 
-use minarrow::{Bitmask, FloatArray};
+use minarrow::{Bitmask, FloatArray, Vec64};
 
 use crate::kernels::scientific::distributions::univariate::common::std::{
-    dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
+    dense_univariate_kernel_f64_std_to, masked_univariate_kernel_f64_std_to,
 };
 use crate::utils::has_nulls;
 use minarrow::enums::error::KernelError;
 
-/// Uniform PDF: f(x|a,b) = 1/(b-a) for x in [a, b], 0 otherwise.
+/// Uniform PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
 #[inline(always)]
-pub fn uniform_pdf_std(
+pub fn uniform_pdf_std_to(
     x: &[f64],
     a: f64,
     b: f64,
+    output: &mut [f64],
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Result<FloatArray<f64>, KernelError> {
-    // 1) parameter checks
+) -> Result<(), KernelError> {
     if !(a < b) || !a.is_finite() || !b.is_finite() {
         return Err(KernelError::InvalidArguments(
             "uniform_pdf: a must be < b and finite".into(),
         ));
     }
-    // 2) empty‐input fast path
     if x.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     let inv_width = 1.0 / (b - a);
@@ -45,46 +46,58 @@ pub fn uniform_pdf_std(
         }
     };
 
-    // Dense fast path (no nulls)
     if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        return Ok(());
     }
 
-    // Null-aware masked path
     let mask_ref = null_mask.expect("uniform_pdf: null_count > 0 requires null_mask");
-
-    // Scalar fallback - alignment check failed
-    let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
+    Ok(())
 }
 
-/// Uniform CDF: F(x|a,b) = 0 if x < a, (x-a)/(b-a) if x in [a,b], 1 if x > b.
+/// Uniform PDF: f(x|a,b) = 1/(b-a) for x in [a, b], 0 otherwise.
 #[inline(always)]
-pub fn uniform_cdf_std(
+pub fn uniform_pdf_std(
     x: &[f64],
     a: f64,
     b: f64,
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // parameter checks
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    uniform_pdf_std_to(x, a, b, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Uniform CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn uniform_cdf_std_to(
+    x: &[f64],
+    a: f64,
+    b: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     if !(a < b) || !a.is_finite() || !b.is_finite() {
         return Err(KernelError::InvalidArguments(
             "uniform_cdf: a must be < b and both finite".into(),
         ));
     }
-    // empty input
     if x.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     let inv_width = 1.0 / (b - a);
@@ -101,25 +114,79 @@ pub fn uniform_cdf_std(
         }
     };
 
-    // Dense fast path (no nulls)
     if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        return Ok(());
     }
 
-    // Null-aware masked path
     let mask_ref = null_mask.expect("uniform_cdf: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
+    Ok(())
+}
 
-    let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
+/// Uniform CDF: F(x|a,b) = 0 if x < a, (x-a)/(b-a) if x in [a,b], 1 if x > b.
+#[inline(always)]
+pub fn uniform_cdf_std(
+    x: &[f64],
+    a: f64,
+    b: f64,
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<FloatArray<f64>, KernelError> {
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
 
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    uniform_cdf_std_to(x, a, b, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Uniform quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn uniform_quantile_std_to(
+    p: &[f64],
+    a: f64,
+    b: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    if !(a < b) || !a.is_finite() || !b.is_finite() {
+        return Err(KernelError::InvalidArguments(
+            "uniform_quantile: a must be < b and finite".into(),
+        ));
+    }
+    if p.is_empty() {
+        return Ok(());
+    }
+
+    let width = b - a;
+
+    let scalar_body = move |pi: f64| -> f64 {
+        if (0.0..=1.0).contains(&pi) && pi.is_finite() {
+            a + pi * width
+        } else {
+            f64::NAN
+        }
+    };
+
+    if !has_nulls(null_count, null_mask) {
+        dense_univariate_kernel_f64_std_to(p, output, scalar_body);
+        return Ok(());
+    }
+
+    let mask_ref = null_mask.expect("uniform_quantile: null_count > 0 requires null_mask");
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(p, mask_ref, output, &mut out_mask, scalar_body);
+    Ok(())
 }
 
 /// Continuous-uniform quantile
@@ -131,45 +198,15 @@ pub fn uniform_quantile_std(
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
-    // parameter checks
-    if !(a < b) || !a.is_finite() || !b.is_finite() {
-        return Err(KernelError::InvalidArguments(
-            "uniform_quantile: a must be < b and finite".into(),
-        ));
-    }
-    // empty input
-    if p.is_empty() {
+    let len = p.len();
+    if len == 0 {
         return Ok(FloatArray::from_slice(&[]));
     }
 
-    let width = b - a;
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
 
-    // scalar & SIMD bodies
-    let scalar_body = move |pi: f64| -> f64 {
-        if (0.0..=1.0).contains(&pi) && pi.is_finite() {
-            a + pi * width
-        } else {
-            f64::NAN
-        }
-    };
+    uniform_quantile_std_to(p, a, b, out.as_mut_slice(), null_mask, null_count)?;
 
-    // dense path (no nulls)
-    if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(p, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
-    }
-
-    // null-aware path
-    let mask_ref = null_mask.expect("uniform_quantile: null_count > 0 requires null_mask");
-
-    let (data, out_mask) = masked_univariate_kernel_f64_std(p, mask_ref, scalar_body);
-
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

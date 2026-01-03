@@ -40,6 +40,29 @@ mod std;
 use minarrow::enums::error::KernelError;
 use minarrow::{Bitmask, FloatArray};
 
+/// Uniform PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn uniform_pdf_to(
+    x: &[f64],
+    a: f64,
+    b: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::uniform_pdf_simd_to(x, a, b, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::uniform_pdf_std_to(x, a, b, output, null_mask, null_count)
+    }
+}
+
 /// Uniform PDF: f(x|a,b) = 1/(b-a) for x in [a, b], 0 otherwise.
 #[inline(always)]
 pub fn uniform_pdf(
@@ -60,6 +83,29 @@ pub fn uniform_pdf(
     }
 }
 
+/// Uniform CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn uniform_cdf_to(
+    x: &[f64],
+    a: f64,
+    b: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::uniform_cdf_simd_to(x, a, b, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::uniform_cdf_std_to(x, a, b, output, null_mask, null_count)
+    }
+}
+
 /// Uniform CDF: F(x|a,b) = 0 if x < a, (x-a)/(b-a) if x in [a,b], 1 if x > b.
 #[inline(always)]
 pub fn uniform_cdf(
@@ -77,6 +123,29 @@ pub fn uniform_cdf(
     #[cfg(not(feature = "simd"))]
     {
         std::uniform_cdf_std(x, a, b, null_mask, null_count)
+    }
+}
+
+/// Uniform quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn uniform_quantile_to(
+    p: &[f64],
+    a: f64,
+    b: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::uniform_quantile_simd_to(p, a, b, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::uniform_quantile_std_to(p, a, b, output, null_mask, null_count)
     }
 }
 
