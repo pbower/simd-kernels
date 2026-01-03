@@ -54,6 +54,37 @@ use minarrow::{Bitmask, FloatArray};
 
 use minarrow::enums::error::KernelError;
 
+/// Beta PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+///
+/// ## Parameters
+/// - `x`: Array of values to evaluate, must be in [0, 1] for non-zero results
+/// - `alpha`: Shape parameter α > 0
+/// - `beta`: Shape parameter β > 0
+/// - `output`: Pre-allocated output buffer (must match input length)
+/// - `null_mask`: Optional validity mask (Arrow-style: 1=valid, 0=null)
+/// - `null_count`: Optional count of null values for optimisation
+#[inline(always)]
+pub fn beta_pdf_to(
+    x: &[f64],
+    alpha: f64,
+    beta: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::beta_pdf_simd_to(x, alpha, beta, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::beta_pdf_std_to(x, alpha, beta, output, null_mask, null_count)
+    }
+}
+
 /// Computes the probability density function (PDF) of the beta distribution.
 ///
 /// Calculates f(x; α, β) = (x^(α-1) * (1-x)^(β-1)) / B(α, β) for each element
@@ -62,7 +93,7 @@ use minarrow::enums::error::KernelError;
 /// ## Parameters
 /// - `x`: Array of values to evaluate, must be in [0, 1] for non-zero results
 /// - `alpha`: Shape parameter α > 0
-/// - `beta`: Shape parameter β > 0  
+/// - `beta`: Shape parameter β > 0
 /// - `null_mask`: Optional validity mask (Arrow-style: 1=valid, 0=null)
 /// - `null_count`: Optional count of null values for optimisation
 ///
@@ -106,6 +137,37 @@ pub fn beta_pdf(
     #[cfg(not(feature = "simd"))]
     {
         std::beta_pdf_std(x, alpha, beta, null_mask, null_count)
+    }
+}
+
+/// Beta CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+///
+/// ## Parameters
+/// - `x`: Array of values to evaluate, domain [0, 1]
+/// - `alpha`: Shape parameter α > 0
+/// - `beta`: Shape parameter β > 0
+/// - `output`: Pre-allocated output buffer (must match input length)
+/// - `null_mask`: Optional validity mask (Arrow-style: 1=valid, 0=null)
+/// - `null_count`: Optional count of null values for optimisation
+#[inline(always)]
+pub fn beta_cdf_to(
+    x: &[f64],
+    alpha: f64,
+    beta: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::beta_cdf_simd_to(x, alpha, beta, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::beta_cdf_std_to(x, alpha, beta, output, null_mask, null_count)
     }
 }
 
@@ -159,6 +221,29 @@ pub fn beta_cdf(
     {
         std::beta_cdf_std(x, alpha, beta, null_mask, null_count)
     }
+}
+
+/// Beta quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+///
+/// ## Parameters
+/// - `p`: Array of probability values to evaluate, must be in [0, 1]
+/// - `alpha`: Shape parameter α > 0
+/// - `beta`: Shape parameter β > 0
+/// - `output`: Pre-allocated output buffer (must match input length)
+/// - `null_mask`: Optional validity mask (Arrow-style: 1=valid, 0=null)
+/// - `null_count`: Optional count of null values for optimisation
+#[inline(always)]
+pub fn beta_quantile_to(
+    p: &[f64],
+    alpha: f64,
+    beta: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::beta_quantile_std_to(p, alpha, beta, output, null_mask, null_count)
 }
 
 /// Computes the quantile function (inverse CDF) of the beta distribution.
