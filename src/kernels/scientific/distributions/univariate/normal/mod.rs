@@ -35,6 +35,37 @@ use minarrow::{Bitmask, FloatArray};
 
 use minarrow::enums::error::KernelError;
 
+/// Normal PDF (zero-allocation variant) - vectorised, SIMD where available.
+///
+/// Writes directly to caller-provided output buffer.
+///
+/// # Parameters
+/// - `x`: input data
+/// - `mean`: normal mean
+/// - `std`: normal standard deviation
+/// - `output`: pre-allocated output buffer (must match input length)
+/// - `null_mask`: optional input null bitmap
+/// - `null_count`: optional input null count
+#[inline(always)]
+pub fn normal_pdf_to(
+    x: &[f64],
+    mean: f64,
+    std: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::normal_pdf_simd_to(x, mean, std, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::normal_pdf_std_to(x, mean, std, output, null_mask, null_count)
+    }
+}
+
 /// Normal PDF - vectorised, SIMD where available, with Arrow-compatible null handling.
 /// Propagates input nulls and sets output null for any non-finite result.
 ///
@@ -60,6 +91,37 @@ pub fn normal_pdf(
     #[cfg(not(feature = "simd"))]
     {
         std::normal_pdf_std(x, mean, std, null_mask, null_count)
+    }
+}
+
+/// Normal CDF (zero-allocation variant) - vectorised, SIMD where available.
+///
+/// Writes directly to caller-provided output buffer.
+///
+/// # Parameters
+/// - `x`: input data
+/// - `mean`: normal mean
+/// - `std`: normal standard deviation
+/// - `output`: pre-allocated output buffer (must match input length)
+/// - `null_mask`: optional input null bitmap
+/// - `null_count`: optional input null count
+#[inline(always)]
+pub fn normal_cdf_to(
+    x: &[f64],
+    mean: f64,
+    std: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::normal_cdf_simd_to(x, mean, std, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::normal_cdf_std_to(x, mean, std, output, null_mask, null_count)
     }
 }
 
@@ -91,7 +153,32 @@ pub fn normal_cdf(
     }
 }
 
-/// https://stackedboxes.org/2017/05/01/acklams-normal-quantile-function/
+/// Normal quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+/// Uses Acklam's approximation: https://stackedboxes.org/2017/05/01/acklams-normal-quantile-function/
+///
+/// # Parameters
+/// - `p`: probability values in [0, 1]
+/// - `mean`: normal mean
+/// - `std`: normal standard deviation
+/// - `output`: pre-allocated output buffer (must match input length)
+/// - `null_mask`: optional input null bitmap
+/// - `null_count`: optional input null count
+#[inline(always)]
+pub fn normal_quantile_to(
+    p: &[f64],
+    mean: f64,
+    std: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    std::normal_quantile_std_to(p, mean, std, output, null_mask, null_count)
+}
+
+/// Normal quantile function.
+/// Uses Acklam's approximation: https://stackedboxes.org/2017/05/01/acklams-normal-quantile-function/
 #[inline(always)]
 pub fn normal_quantile(
     p: &[f64],
