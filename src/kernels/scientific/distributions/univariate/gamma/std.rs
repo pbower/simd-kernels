@@ -30,26 +30,31 @@ use minarrow::enums::error::KernelError;
 
 #[cfg(not(feature = "simd"))]
 use crate::kernels::scientific::distributions::univariate::common::std::{
-    dense_univariate_kernel_f64_std, masked_univariate_kernel_f64_std,
+    dense_univariate_kernel_f64_std, dense_univariate_kernel_f64_std_to,
+    masked_univariate_kernel_f64_std, masked_univariate_kernel_f64_std_to,
 };
 use crate::utils::has_nulls;
 
+/// Scalar implementation of gamma distribution PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
 #[cfg(not(feature = "simd"))]
 #[inline(always)]
-pub fn gamma_pdf_std(
+pub fn gamma_pdf_std_to(
     x: &[f64],
     shape: f64,
     scale: f64, // interpreted as rate β
+    output: &mut [f64],
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
-) -> Result<FloatArray<f64>, KernelError> {
+) -> Result<(), KernelError> {
     if shape <= 0.0 || !shape.is_finite() || scale <= 0.0 || !scale.is_finite() {
         return Err(KernelError::InvalidArguments(
             "gamma_pdf: invalid shape or rate".into(),
         ));
     }
     if x.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     let beta = scale;
@@ -76,44 +81,60 @@ pub fn gamma_pdf_std(
     };
 
     if !has_nulls(null_count, null_mask) {
-        let has_mask = null_mask.is_some();
-        let (data, mask) = dense_univariate_kernel_f64_std(x, has_mask, scalar_body);
-        return Ok(FloatArray {
-            data: data.into(),
-            null_mask: mask,
-        });
+        dense_univariate_kernel_f64_std_to(x, output, scalar_body);
+        return Ok(());
     }
 
     let mask_ref = null_mask.expect("gamma_pdf: null_count > 0 requires null_mask");
-    let (data, out_mask) = masked_univariate_kernel_f64_std(x, mask_ref, scalar_body);
-    Ok(FloatArray {
-        data: data.into(),
-        null_mask: Some(out_mask),
-    })
+    let mut out_mask = mask_ref.clone();
+    masked_univariate_kernel_f64_std_to(x, mask_ref, output, &mut out_mask, scalar_body);
+    Ok(())
 }
 
-/// Gamma CDF: F(x) = γ(k, x/θ) / Γ(k)
-/// Gamma CDF with rate β: F(x) = P(k, β x) = γ(k, β x)/Γ(k)
+#[cfg(not(feature = "simd"))]
 #[inline(always)]
-pub fn gamma_cdf_std(
+pub fn gamma_pdf_std(
     x: &[f64],
     shape: f64,
     scale: f64, // interpreted as rate β
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    gamma_pdf_std_to(x, shape, scale, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Scalar implementation of gamma distribution CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn gamma_cdf_std_to(
+    x: &[f64],
+    shape: f64,
+    scale: f64, // interpreted as rate β
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     if shape <= 0.0 || !shape.is_finite() || scale <= 0.0 || !scale.is_finite() {
         return Err(KernelError::InvalidArguments(
             "gamma_cdf: invalid shape or rate".into(),
         ));
     }
     if x.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
     let beta = scale;
-
     let len = x.len();
-    let mut out = Vec64::with_capacity(len);
 
     let eval = |xi: f64| -> f64 {
         if !xi.is_finite() {
@@ -126,54 +147,74 @@ pub fn gamma_cdf_std(
     };
 
     if !has_nulls(null_count, null_mask) {
-        for &xi in x {
-            out.push(eval(xi));
+        for (i, &xi) in x.iter().enumerate() {
+            output[i] = eval(xi);
         }
-        return Ok(FloatArray::from_vec64(out, null_mask.cloned()));
+        return Ok(());
     }
 
     let mask = null_mask.expect("Null mask must be present if null_count > 0");
     for i in 0..len {
         if !unsafe { mask.get_unchecked(i) } {
-            out.push(f64::NAN);
+            output[i] = f64::NAN;
         } else {
-            out.push(eval(x[i]));
+            output[i] = eval(x[i]);
         }
     }
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(mask.clone()),
-    })
+    Ok(())
 }
 
-/// Gamma quantile (inverse CDF): x such that CDF(x) = p
-/// Gamma quantile (inverse CDF): x such that CDF(x) = p
-///
-/// IMPORTANT: `scale` is the **rate** β (>0), for consistency with `gamma_pdf`/`gamma_cdf`.
+/// Gamma CDF: F(x) = γ(k, x/θ) / Γ(k)
+/// Gamma CDF with rate β: F(x) = P(k, β x) = γ(k, β x)/Γ(k)
 #[inline(always)]
-pub fn gamma_quantile_std(
-    p: &[f64],
-    shape: f64, // k > 0
-    scale: f64, // rate β > 0  (NOT θ)
+pub fn gamma_cdf_std(
+    x: &[f64],
+    shape: f64,
+    scale: f64, // interpreted as rate β
     null_mask: Option<&Bitmask>,
     null_count: Option<usize>,
 ) -> Result<FloatArray<f64>, KernelError> {
+    let len = x.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    gamma_cdf_std_to(x, shape, scale, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
+}
+
+/// Scalar implementation of gamma distribution quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn gamma_quantile_std_to(
+    p: &[f64],
+    shape: f64, // k > 0
+    scale: f64, // rate β > 0  (NOT θ)
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
     if shape <= 0.0 || !shape.is_finite() || scale <= 0.0 || !scale.is_finite() {
         return Err(KernelError::InvalidArguments(
             "gamma_quantile: invalid shape or rate".into(),
         ));
     }
     if p.is_empty() {
-        return Ok(FloatArray::from_slice(&[]));
+        return Ok(());
     }
 
     let beta = scale;
+    let len = p.len();
 
     // Use upper-tail inversion when (1-p) is tiny (large-x regime).
     // Central & left regions go through the lower-tail inverter.
     const RIGHT_TAIL_SWITCH: f64 = 1e-10;
 
-    let mut out = Vec64::with_capacity(p.len());
     let eval = |prob: f64| -> f64 {
         if !prob.is_finite() || prob < 0.0 || prob > 1.0 {
             return f64::NAN;
@@ -197,22 +238,43 @@ pub fn gamma_quantile_std(
     };
 
     if !has_nulls(null_count, null_mask) {
-        for &pi in p {
-            out.push(eval(pi));
+        for (i, &pi) in p.iter().enumerate() {
+            output[i] = eval(pi);
         }
-        return Ok(FloatArray::from_vec64(out, null_mask.cloned()));
+        return Ok(());
     }
 
     let mask = null_mask.expect("Null mask must be present if null_count > 0");
-    for i in 0..p.len() {
+    for i in 0..len {
         if !unsafe { mask.get_unchecked(i) } {
-            out.push(f64::NAN);
+            output[i] = f64::NAN;
         } else {
-            out.push(eval(p[i]));
+            output[i] = eval(p[i]);
         }
     }
-    Ok(FloatArray {
-        data: out.into(),
-        null_mask: Some(mask.clone()),
-    })
+    Ok(())
+}
+
+/// Gamma quantile (inverse CDF): x such that CDF(x) = p
+///
+/// IMPORTANT: `scale` is the **rate** β (>0), for consistency with `gamma_pdf`/`gamma_cdf`.
+#[inline(always)]
+pub fn gamma_quantile_std(
+    p: &[f64],
+    shape: f64, // k > 0
+    scale: f64, // rate β > 0  (NOT θ)
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<FloatArray<f64>, KernelError> {
+    let len = p.len();
+    if len == 0 {
+        return Ok(FloatArray::from_slice(&[]));
+    }
+
+    let mut out = Vec64::with_capacity(len);
+    unsafe { out.set_len(len) };
+
+    gamma_quantile_std_to(p, shape, scale, out.as_mut_slice(), null_mask, null_count)?;
+
+    Ok(FloatArray::from_vec64(out, null_mask.cloned()))
 }

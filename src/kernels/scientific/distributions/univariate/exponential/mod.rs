@@ -6,9 +6,31 @@ mod simd;
 #[cfg(not(feature = "simd"))]
 mod std;
 
-use minarrow::{Bitmask, FloatArray};
-
+use minarrow::Bitmask;
+use minarrow::FloatArray;
 use minarrow::enums::error::KernelError;
+
+/// Exponential PDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn exponential_pdf_to(
+    x: &[f64],
+    lambda: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::exponential_pdf_simd_to(x, lambda, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::exponential_pdf_std_to(x, lambda, output, null_mask, null_count)
+    }
+}
 
 /// Exponential PDF: f(x|λ) = λ·exp(-λ·x) for x ≥ 0, 0 otherwise.
 /// Returns error if λ ≤ 0 or non-finite.
@@ -30,6 +52,28 @@ pub fn exponential_pdf(
     }
 }
 
+/// Exponential CDF (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn exponential_cdf_to(
+    x: &[f64],
+    lambda: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::exponential_cdf_simd_to(x, lambda, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::exponential_cdf_std_to(x, lambda, output, null_mask, null_count)
+    }
+}
+
 /// Exponential CDF: F(x|λ) = 1 – exp(–λ·x) for x ≥ 0, 0 otherwise.
 /// Error if λ ≤ 0 or non‐finite.
 #[inline(always)]
@@ -47,6 +91,28 @@ pub fn exponential_cdf(
     #[cfg(not(feature = "simd"))]
     {
         std::exponential_cdf_std(x, lambda, null_mask, null_count)
+    }
+}
+
+/// Exponential quantile (zero-allocation variant).
+///
+/// Writes directly to caller-provided output buffer.
+#[inline(always)]
+pub fn exponential_quantile_to(
+    p: &[f64],
+    lambda: f64,
+    output: &mut [f64],
+    null_mask: Option<&Bitmask>,
+    null_count: Option<usize>,
+) -> Result<(), KernelError> {
+    #[cfg(feature = "simd")]
+    {
+        simd::exponential_quantile_simd_to(p, lambda, output, null_mask, null_count)
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        std::exponential_quantile_std_to(p, lambda, output, null_mask, null_count)
     }
 }
 
