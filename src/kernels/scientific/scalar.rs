@@ -268,9 +268,16 @@ impl_vecmap!(round, round_to, round_elem, |x: f64| x.round());
 impl_vecmap!(sign, sign_to, sign_elem, |x: f64| x.signum());
 
 // Activation functions
-impl_vecmap!(sigmoid, sigmoid_to, sigmoid_elem, |x: f64| 1.0 / (1.0 + (-x).exp()));
-impl_vecmap!(softplus, softplus_to, softplus_elem, |x: f64| (1.0 + x.exp()).ln());
-impl_vecmap!(relu, relu_to, relu_elem, |x: f64| if x > 0.0 { x } else { 0.0 });
+impl_vecmap!(sigmoid, sigmoid_to, sigmoid_elem, |x: f64| 1.0
+    / (1.0 + (-x).exp()));
+impl_vecmap!(softplus, softplus_to, softplus_elem, |x: f64| (1.0
+    + x.exp())
+.ln());
+impl_vecmap!(relu, relu_to, relu_elem, |x: f64| if x > 0.0 {
+    x
+} else {
+    0.0
+});
 impl_vecmap!(gelu, gelu_to, gelu_elem, |x: f64| {
     0.5 * x * (1.0 + erf_fn(x / std::f64::consts::SQRT_2))
 });
