@@ -170,9 +170,7 @@ pub fn cauchy_quantile(
     std::cauchy_quantile_std(p, location, scale, null_mask, null_count)
 }
 
-// ============================================================================
 // Zero-allocation variants
-// ============================================================================
 
 /// Cauchy PDF (zero-allocation variant).
 ///

@@ -26,20 +26,37 @@ use minarrow::utils::is_simd_aligned;
 use minarrow::{Bitmask, FloatArray, Vec64};
 use std::simd::{LaneCount, SupportedLaneCount};
 
-/// Generates a mapping kernel in two variants:
+/// Generates a mapping kernel in three variants:
 ///
 /// 1. `$name_to` - Zero-allocation canonical implementation, writes to caller's buffer
 /// 2. `$name` - Allocates internally, delegates to `$name_to`
+/// 3. `$name_elem` - Element-wise `fn(f64) -> f64` for kernel fusion
 ///
 /// The `_to` variant is for pre-allocated parallel execution where each chunk
 /// writes directly to its slice of a shared output buffer.
 ///
-/// `$name`     – allocating function name
-/// `$name_to`  – zero-allocation function name
-/// `$expr`     – expression mapping a scalar `f64 -> f64`
+/// The `_elem` variant is for kernel fusion where multiple operations are composed
+/// into a single loop, keeping intermediate values in registers instead of memory.
+///
+/// `$name`      – allocating function name
+/// `$name_to`   – zero-allocation function name
+/// `$name_elem` – element-wise function for fusion
+/// `$expr`      – expression mapping a scalar `f64 -> f64`
 #[macro_export]
 macro_rules! impl_vecmap {
-    ($name:ident, $name_to:ident, $expr:expr) => {
+    ($name:ident, $name_to:ident, $name_elem:ident, $expr:expr) => {
+        /// Element-wise variant for kernel fusion.
+        ///
+        /// # Example
+        /// ```ignore
+        /// let ops = &[neg_elem, exp_elem, sin_elem];
+        /// execute_fused::<8>(input, output, ops);
+        /// // Equivalent to neg -> exp -> sin but with ONE memory read/write
+        /// ```
+        #[inline(always)]
+        pub fn $name_elem(x: f64) -> f64 {
+            $expr(x)
+        }
         /// Zero-allocation variant: writes directly to caller's output buffer.
         ///
         /// Canonical implementation with full SIMD acceleration and null handling.
@@ -209,44 +226,51 @@ macro_rules! impl_vecmap {
     };
 }
 
-impl_vecmap!(abs, abs_to, |x: f64| x.abs());
-impl_vecmap!(neg, neg_to, |x: f64| -x);
-impl_vecmap!(recip, recip_to, |x: f64| 1.0 / x);
-impl_vecmap!(sqrt, sqrt_to, |x: f64| x.sqrt());
-impl_vecmap!(cbrt, cbrt_to, |x: f64| x.cbrt());
+// Basic operations
+impl_vecmap!(abs, abs_to, abs_elem, |x: f64| x.abs());
+impl_vecmap!(neg, neg_to, neg_elem, |x: f64| -x);
+impl_vecmap!(recip, recip_to, recip_elem, |x: f64| 1.0 / x);
+impl_vecmap!(sqrt, sqrt_to, sqrt_elem, |x: f64| x.sqrt());
+impl_vecmap!(cbrt, cbrt_to, cbrt_elem, |x: f64| x.cbrt());
 
-impl_vecmap!(exp, exp_to, |x: f64| x.exp());
-impl_vecmap!(exp2, exp2_to, |x: f64| x.exp2());
-impl_vecmap!(ln, ln_to, |x: f64| x.ln());
-impl_vecmap!(log2, log2_to, |x: f64| x.log2());
-impl_vecmap!(log10, log10_to, |x: f64| x.log10());
+// Exponential and logarithmic
+impl_vecmap!(exp, exp_to, exp_elem, |x: f64| x.exp());
+impl_vecmap!(exp2, exp2_to, exp2_elem, |x: f64| x.exp2());
+impl_vecmap!(ln, ln_to, ln_elem, |x: f64| x.ln());
+impl_vecmap!(log2, log2_to, log2_elem, |x: f64| x.log2());
+impl_vecmap!(log10, log10_to, log10_elem, |x: f64| x.log10());
 
-impl_vecmap!(sin, sin_to, |x: f64| x.sin());
-impl_vecmap!(cos, cos_to, |x: f64| x.cos());
-impl_vecmap!(tan, tan_to, |x: f64| x.tan());
-impl_vecmap!(asin, asin_to, |x: f64| x.asin());
-impl_vecmap!(acos, acos_to, |x: f64| x.acos());
-impl_vecmap!(atan, atan_to, |x: f64| x.atan());
+// Trigonometric
+impl_vecmap!(sin, sin_to, sin_elem, |x: f64| x.sin());
+impl_vecmap!(cos, cos_to, cos_elem, |x: f64| x.cos());
+impl_vecmap!(tan, tan_to, tan_elem, |x: f64| x.tan());
+impl_vecmap!(asin, asin_to, asin_elem, |x: f64| x.asin());
+impl_vecmap!(acos, acos_to, acos_elem, |x: f64| x.acos());
+impl_vecmap!(atan, atan_to, atan_elem, |x: f64| x.atan());
 
-impl_vecmap!(sinh, sinh_to, |x: f64| x.sinh());
-impl_vecmap!(cosh, cosh_to, |x: f64| x.cosh());
-impl_vecmap!(tanh, tanh_to, |x: f64| x.tanh());
-impl_vecmap!(asinh, asinh_to, |x: f64| x.asinh());
-impl_vecmap!(acosh, acosh_to, |x: f64| x.acosh());
-impl_vecmap!(atanh, atanh_to, |x: f64| x.atanh());
+// Hyperbolic
+impl_vecmap!(sinh, sinh_to, sinh_elem, |x: f64| x.sinh());
+impl_vecmap!(cosh, cosh_to, cosh_elem, |x: f64| x.cosh());
+impl_vecmap!(tanh, tanh_to, tanh_elem, |x: f64| x.tanh());
+impl_vecmap!(asinh, asinh_to, asinh_elem, |x: f64| x.asinh());
+impl_vecmap!(acosh, acosh_to, acosh_elem, |x: f64| x.acosh());
+impl_vecmap!(atanh, atanh_to, atanh_elem, |x: f64| x.atanh());
 
-impl_vecmap!(erf, erf_to, |x: f64| erf_fn(x));
-impl_vecmap!(erfc, erfc_to, |x: f64| erf_fn(x));
+// Error functions
+impl_vecmap!(erf, erf_to, erf_elem, |x: f64| erf_fn(x));
+impl_vecmap!(erfc, erfc_to, erfc_elem, |x: f64| 1.0 - erf_fn(x));
 
-impl_vecmap!(ceil, ceil_to, |x: f64| x.ceil());
-impl_vecmap!(floor, floor_to, |x: f64| x.floor());
-impl_vecmap!(trunc, trunc_to, |x: f64| x.trunc());
-impl_vecmap!(round, round_to, |x: f64| x.round());
-impl_vecmap!(sign, sign_to, |x: f64| x.signum());
+// Rounding
+impl_vecmap!(ceil, ceil_to, ceil_elem, |x: f64| x.ceil());
+impl_vecmap!(floor, floor_to, floor_elem, |x: f64| x.floor());
+impl_vecmap!(trunc, trunc_to, trunc_elem, |x: f64| x.trunc());
+impl_vecmap!(round, round_to, round_elem, |x: f64| x.round());
+impl_vecmap!(sign, sign_to, sign_elem, |x: f64| x.signum());
 
-impl_vecmap!(sigmoid, sigmoid_to, |x: f64| 1.0 / (1.0 + (-x).exp()));
-impl_vecmap!(softplus, softplus_to, |x: f64| (1.0 + x.exp()).ln());
-impl_vecmap!(relu, relu_to, |x: f64| if x > 0.0 { x } else { 0.0 });
-impl_vecmap!(gelu, gelu_to, |x: f64| 0.5
-    * x
-    * (1.0 + erf_fn(x / std::f64::consts::SQRT_2)));
+// Activation functions
+impl_vecmap!(sigmoid, sigmoid_to, sigmoid_elem, |x: f64| 1.0 / (1.0 + (-x).exp()));
+impl_vecmap!(softplus, softplus_to, softplus_elem, |x: f64| (1.0 + x.exp()).ln());
+impl_vecmap!(relu, relu_to, relu_elem, |x: f64| if x > 0.0 { x } else { 0.0 });
+impl_vecmap!(gelu, gelu_to, gelu_elem, |x: f64| {
+    0.5 * x * (1.0 + erf_fn(x / std::f64::consts::SQRT_2))
+});
