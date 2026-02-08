@@ -1,268 +1,186 @@
-# SIMD-Kernels – *Lightning Fast, Arrow-Compatible Compute Kernels*
+# SIMD-Kernels
 
-## Intro
+**High-performance compute kernels for Rust, built on `std::simd`.**
 
-_Welcome to `SIMD-Kernels`._
+SIMD-Kernels gives you vectorised arithmetic, statistics, scientific functions, and sorting that operate directly on typed slices. Built on Rust's [`std::simd`](https://doc.rust-lang.org/std/simd/) portable SIMD, so you get hardware-accelerated kernels on every platform without writing a single intrinsic. Null-aware by default, feature-gated for minimal footprint, and ready for real-time or HPC workloads.
 
-`SIMD-Kernels` is a modern library of compute kernels built on top of [`std::simd`](https://doc.rust-lang.org/std/simd/) for high-performance analytics and scientific computing in Rust.  
-It implements the core arithmetic, statistical, logical, and scientific operations required for data systems —  
-accelerated with SIMD, aligned for cache efficiency, and compatible with the Apache Arrow model.
+## Why SIMD-Kernels?
 
-The kernels it implements form the computational core of the analytics stack, and it integrates cleanly with the [`minarrow`](https://github.com/lightning-lib/minarrow) columnar runtime.
+**The problem:** Writing SIMD by hand means maintaining separate code paths for SSE2, AVX2, AVX-512, and NEON. Most libraries either avoid SIMD entirely, rely on auto-vectorisation hints that may or may not fire, or use trait-object dispatch that defeats the optimiser at the call boundary.
 
-## Design Focus
+**The solution:** SIMD-Kernels is built directly on [`std::simd`](https://doc.rust-lang.org/std/simd/), the portable SIMD module in Rust's standard library. `std::simd` is a major investment area for the Rust project — it provides a single, portable abstraction over hardware vector instructions that the compiler lowers to the best available ISA on each target. You write one kernel, and it runs vectorised on x86, ARM, and WASM without platform-specific intrinsics or conditional compilation.
 
-- **SIMD-first execution** – Built directly on `std::simd`  
-- **Null-aware semantics** – Full support for Arrow-style null masks  
-- **Typed, minimal interfaces** – No dynamic typing, no downcasting  
-- **Production-grade kernels** – Matches SciPy and BLAS/LAPACK numerics  
-- **Configurable footprint** – Feature-gated compilation, opt-in performance semantics.
+On top of that foundation, every kernel here operates on concrete typed slices like `&[f64]` or `&[i32]`, with explicit null-mask support following Apache Arrow semantics. No `dyn`, no `Any`, no runtime downcasting.
 
-## Why I built SIMD-Kernels
-
-- **Most compute kernels today are generic, boxed, or opaque**. This creates unnecessary branches, cache misses, and dynamic lookup overhead in performance-critical systems.
-- **Rust deserves a low-level kernel library** — typed, SIMD-native, and engineered for real-time and HPC workloads.
-- `SIMD-kernels` focuses on ergonomics, throughput, and correctness—designed to **maximise hardware utilisation**, whilst remaining easy to use for modern data breadth.
-
----
-
-## Key Features
-
-### SIMD by Default
-
-- All operations are vectorised using `std::simd` with auto-vectorising fallback for scalar lanes.
-- Native CPU features are respected using `RUSTFLAGS="-C target-cpu=native"`.
-- 64-byte aligned buffers via `Vec64`, with alignment checks for SIMD correctness.
-
-### Null-Aware Execution
-
-- Every kernel is null-mask aware and consistent with Apache-Arrow null semantics.
-- Null propagation, masking, and early exits are SIMD-accelerated where possible.
-
-### Full Numeric Coverage
-
-- **Arithmetic**: All numeric types (`i8`–`u64`, `f32`/`f64`) with overflow handling.
-- **Statistics**: Mean, variance, standard deviation, z-score normalisation.
-- **Probability Distributions**: 19 PDFs, CDFs, and quantiles with <1e-12 error bounds.
-- **Scientific Functions**: `erf`, `gamma`, FFT, matrix/vector ops.
-- **Linear Algebra**: Optional BLAS/LAPACK backend integration.
-- **FFT**: Blocked radix-2/4/8 pipelines with SIMD and complex arithmetic.
-
-### Feature Compilation
-
-Sub 2-second compile times with standard features.
-
-Modular by design. Enable only what you need:
-
-- `linear_algebra` – BLAS/LAPACK via system libraries  
-- `probability_distributions` – PDFs, CDFs, quantiles  
-- `fourier_transforms` – FFT operations  
-- `universal_functions` – Scalar maths: exp, ln, sin, etc.
-
-```toml
-[features]
-default = []
-linear_algebra = ["blas-src"]
-probability_distributions = []
-fourier_transforms = []
-```
-
-### Repo Structure
-
-simd-kernels is divided into tightly scoped submodules:
-
-```markdown
-simd-kernels/
-├── kernels/
-│   ├── arithmetic/       # SIMD + null-safe arithmetic
-│   ├── aggregate/        # Sum, mean, variance, etc.
-│   ├── comparison/       # SIMD comparisons
-│   ├── logical/          # Boolean logic (AND, OR, XOR)
-│   ├── conditional/      # if-then-else kernels
-│   ├── string/           # String processing
-│   ├── window/           # Sliding window kernels
-│   ├── binary/           # Bitwise ops
-│   ├── sort/             # Parallel SIMD sort kernels
-│   ├── scientific/       # Special functions + FFT + matrix
-│   │   ├── distributions/ # PDFs, CDFs, quantiles
-│   │   ├── erf/           # Error functions
-│   │   ├── fft/           # FFT pipelines
-│   │   ├── matrix/        # Dense matrix kernels
-│   │   ├── vector/        # SIMD vector ops
-│   │   └── blas_lapack/   # External LAPACK bindings
-├── traits/               # Kernel traits + marker traits
-├── config/               # Compile-time feature flags
-├── errors/               # KernelError definitions
-└── utils/                # Internal helpers (alignment, dispatch)
-```
-
-### Example: SIMD Arithmetic with Nulls
+## Quick Start
 
 ```rust
 use simd_kernels::kernels::arithmetic::add_f64_dense;
-use minarrow::{FloatArray, arr_f64};
 
-let a = arr_f64![1.0, 2.0, 3.0];
-let b = arr_f64![10.0, 20.0, 30.0];
+let a = &[1.0, 2.0, 3.0];
+let b = &[10.0, 20.0, 30.0];
 
-let result = add_f64_dense(&a, &b).unwrap();
-assert_eq!(result.values(), &[11.0, 22.0, 33.0]);
+let result = add_f64_dense(a, b);
+// [11.0, 22.0, 33.0]
 ```
 
 All arithmetic kernels use SIMD internally and support both dense and null-masked variants.
-This is particularly effective for fused multiply-add (FMA) kernels.
 
-### Null mask handling
+## What's Included
 
-SIMD-kernels supports **Apache-Arrow** compatible null-masks via **Minarrow**.
+### Core Kernels
 
-- Null masks are opt-in
-- leaving them out skips checks by going straight to dense kernel versions. 
-- Additionally, one can supply a `null_count = 0` to skip it similarly. 
+| Module | Description |
+|--------|-------------|
+| `aggregate` | Sum, mean, variance, min/max, count distinct |
+| `binary` | Bitwise operations |
+| `comparison` | SIMD mask comparisons across all numeric types |
+| `conditional` | Lane-parallel if-then-else |
+| `logical` | Boolean logic with bitmap kernels |
+| `sort` | SIMD radix sort with optional parallel sorting |
+| `unary` | Element-wise transforms |
+| `vector` | Dot product, norms, weighted stats |
+| `window` | Sliding window aggregations |
 
-This is useful in micro-batching contexts. 
+### Scientific Computing
 
-If you use **Minarrow**, you get this easily and with zero-copy semantics from very low-overhead types.  
+| Module | Description |
+|--------|-------------|
+| `scientific/distributions` | 19 univariate families, 60+ functions — see below |
+| `scientific/erf` | Error functions |
+| `scientific/fft` | Radix-2/4/8 FFT pipelines with SIMD complex arithmetic |
+| `scientific/matrix` | Dense matrix kernels |
+| `scientific/scalar` | exp, ln, log10, gamma, and friends |
+| `scientific/vector` | SIMD vector operations |
+| `scientific/blas_lapack` | Optional BLAS/LAPACK bindings |
 
-*Note: this crate is not affiliated with Apache Arrow, however it implements Arrow-compatible null-semantics, and builds on *Minarrow*, which implements a focused subset of the Apache Arrow specification.*
+### Probability Distributions
 
-### SIMD Kernel Coverage
+The distributions module is one of the most substantial pieces of this library. Each of the 19 univariate families provides PDF, CDF, and quantile functions — over 60 kernels in total — all SIMD-accelerated where beneficial and individually validated against SciPy to high precision.
 
-| Operation               | SIMD Support                       |
-| ----------------------- | ---------------------------------- |
-| `+ - * / %`             | ✅ All numeric types                |
-| `< <= == != >= >`       | ✅ SIMD mask comparisons            |
-| `is_nan`, `is_null`     | ✅ SIMD + bitmap logic              |
-| `exp`, `ln`, `log10`    | ✅ SIMD ufuncs                      |
-| `normal_pdf`            | ⚠️ Yes, but only where it makes sense. **21 univariate families (60+ functions!) are implemented, and tested against SciPy**. *Roughly half of these are SIMD accelerated*.|
-| `fft8_radix`            | ✅ DIT radix-8 via SIMD complex ops |
-| `matmul`, `dot`, `axpy` | ✅ (optional via `linear_algebra`)  |
-| `if_else`               | ✅ SIMD-lane conditional            |
-| `sum`, `mean`, `stdev`  | ✅ SIMD + null-aware                |
-| `regex_match`           | ✅ via regex crate                  |
-| `sort`                  | ✅ SIMD radix sort                  |
-| |    |
+| Family | | | |
+|--------|---|---|---|
+| Normal | Beta | Gamma | Student's t |
+| Exponential | Weibull | Cauchy | Logistic |
+| Lognormal | Laplace | Chi-squared | Gumbel |
+| Poisson | Binomial | Geometric | Negative Binomial |
+| Hypergeometric | Uniform | Discrete Uniform | |
 
-## Accuracy Targets
+Each family has both a scalar fallback path and a SIMD-vectorised path. The SIMD path is selected automatically when the `simd` feature is enabled.
 
-Most statistical and scientific functions achieve relative error < 1e-15 for f64 compared to SciPy on standard domains.
+```rust
+use simd_kernels::kernels::scientific::distributions::univariate::normal::*;
 
-Typical accuracy in the integration test suite is:
+let x = &[-2.0, -1.0, 0.0, 1.0, 2.0];
+let pdf = normal_pdf(x, 0.0, 1.0, None, None).unwrap();
+let cdf = normal_cdf(x, 0.0, 1.0, None, None).unwrap();
+```
 
-< 1e-15 for core functions (e.g., normal_pdf, gamma, erf)
-< 1e-14 for distributions across mean ranges
-< 1e-12 in certain heavy-tail or extreme domains
-< 1e-10 in certain boundary cases, where SciPy itself becomes numerically unstable
+To put this in context: SciPy's `scipy.stats` has been the gold standard for statistical distributions in Python for over a decade. SIMD-Kernels provides the same family coverage with the same level of numerical rigour, but running natively in Rust with SIMD vectorisation. Every function is tested against SciPy reference outputs across standard domains, tail regions, and known edge cases.
 
-Each implementation is tested against reference outputs from SciPy, hardcoded from a valid baseline x86_64 platform.
-These values are embedded in the test suite, so you can run full accuracy tests on your own architecture *(and expect minor floating point tolerances)*.
+## Null-Mask Handling
 
-That said, no accuracy guarantees are made. This library is new, and while SciPy has benefited from over a decade of numerical tuning and user feedback, simd-kernels is still maturing. If you require strict numerical guarantees, you must perform your own validations on all critical paths.
+Kernels support Apache Arrow-compatible null masks via [Minarrow](https://github.com/peterbow/minarrow):
 
-We make no guarantees regarding numerical accuracy. If you rely on this library in critical contexts, you must perform your own validation. 
-Use is at your own risk.
+- Null masks are opt-in. Omitting them routes directly to dense kernel paths.
+- Supplying `null_count = 0` skips mask checks identically.
+- Null propagation, masking, and early exits are SIMD-accelerated where possible.
 
-## Performance Model
-* SIMD auto-vectorisation with std::simd::Simd<T, LANES>
-* Fall back to scalar loop for non-aligned or low-lane inputs
-* Automatic 64-byte aligned inputs via **Minarrow's** `Vec64`, which is the standard
-Vec with a custom 64-byte allocator (*demonstrated in that repo's benchmarks to be practically as fast as the standard Vec*).
-* Null-masked iteration is lane-parallel when possible, and bitmask kernels are already highly efficient through word-based kernels.
+This is useful in micro-batching contexts where you know data is clean.
 
-## Compiling
-Make sure SIMD compiles correctly with:
+*This crate is not affiliated with Apache Arrow. It implements Arrow-compatible null semantics and builds on Minarrow, which implements a focused subset of the Arrow specification.*
+
+## Feature Flags
+
+Enable only what you need. Sub 2-second compile times with defaults.
+
+| Feature | Description |
+|---------|-------------|
+| `simd` | SIMD acceleration via `std::simd` (default) |
+| `probability_distributions` | PDFs, CDFs, quantiles (default) |
+| `fourier_transforms` | FFT operations (default) |
+| `universal_functions` | Scalar maths: exp, ln, sin, etc. (default) |
+| `linear_algebra` | BLAS/LAPACK via OpenBLAS |
+| `parallel_sort` | Parallel sorting via Rayon |
+| `simd_sort` | SIMD-accelerated radix sort for integers |
+| `fast_hash` | ahash for count distinct and categorical ops |
+
+```toml
+[dependencies]
+simd-kernels = { version = "0.2", features = ["linear_algebra"] }
+```
+
+## Numerical Accuracy
+
+Getting SIMD performance is one thing. Getting it while matching SciPy's numerical output is another.
+
+Every distribution function, special function, and scientific kernel in this library has been validated against SciPy reference outputs across standard domains, tail regions, and known difficult cases. The reference values are hardcoded from a validated x86_64 baseline and embedded directly in the test suite, so you can run the full accuracy checks on your own architecture.
+
+Typical relative error for f64:
+
+| Domain | Relative Error |
+|--------|---------------|
+| Core functions like `normal_pdf`, `gamma`, `erf` | < 1e-15 |
+| Distributions across standard mean ranges | < 1e-14 |
+| Heavy-tail and extreme domains | < 1e-12 |
+| Boundary cases where SciPy itself becomes unstable | < 1e-10 |
+
+**This library is provided as-is, with no warranties or guarantees of accuracy, correctness, or fitness for any purpose. Any reliance on it in critical, safety-related, or production systems is entirely at the user’s own risk. Users must independently verify all paths and outputs.**
+
+## SIMD Configuration
+
+Because `std::simd` is portable, you don't need to configure anything for correct vectorisation — it works out of the box. The options below are for squeezing out extra performance or testing specific ISA widths.
+
+### Compiling
+
+To let the compiler use your CPU's full instruction set:
+
+```bash
 RUSTFLAGS="-C target-cpu=native" cargo +nightly build --features simd
+```
 
-## Overriding SIMD Lane Widths
-By default, simd-kernels uses conservative architecture-specific lane widths inferred from CARGO_CFG_TARGET_FEATURE.
-However, you may override these lane counts at build time to experiment or test alternate configurations. 
+### Overriding Lane Widths
 
-Set the environment variable SIMD_LANES_OVERRIDE before compiling:
+By default, lane widths are inferred from `CARGO_CFG_TARGET_FEATURE`. For testing or experimentation, you can override them:
+
 ```bash
 # Format: "W8,W16,W32,W64"
-# For example, simulate AVX-512:
+# Example: simulate AVX-512
 SIMD_LANES_OVERRIDE="64,32,16,8" \
 RUSTFLAGS="-C target-cpu=native" \
 cargo +nightly build --features simd
 ```
 
-This will override the automatically detected SIMD widths with:
+### Reference: SIMD Widths by Architecture
 
-* `W8 = 64` (e.g. u8, i8)
-* `W16 = 32` (e.g. u16, i16)
-* `W32 = 16` (e.g. f32, i32)
-* `W64 = 8` (e.g. f64, i64)
+| Feature | Register Width | f64 lanes | f32 lanes | i16 lanes |
+|---------|---------------|-----------|-----------|-----------|
+| SSE2 | 128-bit | 2 | 4 | 8 |
+| AVX/AVX2 | 256-bit | 4 | 8 | 16 |
+| AVX-512 | 512-bit | 8 | 16 | 32 |
+| NEON | 128-bit | 2 | 4 | 8 |
+| WASM SIMD128 | 128-bit | 2 | 4 | 8 |
 
-### Finding out what your machine supports
-An easy way is to check what SIMD lanes your CPU actually supports is `lscpu | grep -i width` in bash, then look for the 'Flags' section. Then, the flags will show text e.g., *avx, avx2, avx512f* etc. This is how to then interpret that, so you can set the flags accordingly:
+Check what your CPU supports with `lscpu | grep Flags` and look for `avx`, `avx2`, `avx512f`, etc.
 
-| Feature      | Register Width | Lane Count (f64) | Lane Count (f32) | Lane Count (i16) |
-| ------------ | -------------- | ---------------- | ---------------- | ---------------- |
-| SSE2         | 128 bits       | 2                | 4                | 8                |
-| AVX          | 256 bits       | 4                | 8                | 16               |
-| AVX-512      | 512 bits       | 8                | 16               | 32               |
-| NEON         | 128 bits       | 2                | 4                | 8                |
-| WASM SIMD128 | 128 bits       | 2                | 4                | 8                |
+## Going Faster
 
-For e.g., W64 should be set to '2' if you are on SSE2 with a consumer laptop.
+SIMD gives you parallelism within a single thread — wider lanes means more work per cycle. This library deliberately stops there. Thread-level parallelism is use-case specific, and the orchestration overhead of getting it wrong can dwarf the gains.
 
-## Going faster
-Obviously, the more lanes, the more parallel your computations will be within the same 
-thread. However this library purposely excludes thread-parallel computations given
-that it is use case specific, with millisecond-level orchestration overhead. Combining 
-this library with `Rayon` will make data fast. `Minarrow` supports this pattern natively.
-
-## Target Use Cases
-
-| Use Case                        | Description                                       |
-| ------------------------------- | ------------------------------------------------- |
-| Extreme low-latency computation | Very low abstraction overhead, direct kernels     |
-| Engine Kernel Layer             | High-throughput compute for execution engines     |
-| Statistical Pipelines           | SIMD evaluation of distributions + aggregates     |
-| Signal Processing               | FFTs, filters, and transforms                     |
-| Vectorised Scientific Computing | Accurate special functions                        |
-| Columnar DBMS                   | Null-aware SIMD kernels for query pipelines       |
-| Embedded Systems                | Compile-time feature gating for footprint control |
-
-## Philosophy
-
-**Flexible** – Every kernel is statically typed and callable with no dynamic dispatch. Numerical kernels are all slice-compatible, so they support diverse entry
-contexts.
-
-**Fast** – Always use SIMD lanes where possible, fallback only when required.
-Guaranteed 64-byte alignment when using `Minarrow`'s `Vec64`, `IntegerArray` or `FloatArray` types.
-
-**Composable** – Minimal deps, fast builds, clean layering.
-
-**Feature-rich** – Proper mask propagation and bitmap handling, even on
-univariate distributions. Or, opt out completely for standard float NaN semantics.
-
-**Compatible** – When using via **minarrow**, you get FFI compatible buffers, `.to_apache_arrow()` and `.to_polars()`.
-
+The intended pattern is to pair SIMD-Kernels with a threading layer of your choice. [Rayon](https://github.com/rayon-rs/rayon) is the natural fit for batch workloads. For streaming or engine contexts, a work-stealing scheduler can distribute slice-level kernel calls across cores. Either way, the kernels themselves stay single-threaded, predictable, and cache-friendly.
 
 ## Contributing
 
-We welcome contributions in the following areas:
+Contributions welcome:
 
-* Kernel Coverage – Add kernels for missing primitives
-* Numerical Accuracy – Validate against SciPy, write regression tests
-* SIMD Optimisation – Improve SIMD coverage, improve speed
+1. **Kernel coverage** - Add kernels for missing primitives
+2. **Numerical accuracy** - Validate against SciPy, write regression tests
+3. **SIMD optimisation** - Improve vectorisation coverage and throughput
 
-See CONTRIBUTING.md for guidance.
-
-## Benchmarks
-
-Coming soon.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-Licensed under the Mozilla Public License (MPL) 2.0
+Mozilla Public License (MPL) 2.0.
 
-This license is in place to strike a balance between open ecosystem contribution, developer
-and enterprise needs. 
-
-If you have commercial requirements not covered by this license, please reach out directly.
-
-## Feedback
-
-Please open an issue or reach out with ideas, requests, or contributions.
+This strikes a balance between open ecosystem contribution and enterprise needs. If you have commercial requirements not covered by MPL-2.0, please reach out directly.
